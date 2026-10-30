@@ -48,16 +48,26 @@ Notable design decisions:
 
 ## Getting started
 
+One-command launcher (checks the toolchain, installs deps, generates icons,
+then starts the app):
+
+```bash
+npm start            # desktop app in dev mode (tauri dev)
+npm start -- --mock  # browser-only dev mode (mock data, no Rust needed)
+npm start -- --build # production bundle
+npm start -- --check # full quality gate
+
+# Platform entry points (no npm required):
+#   Windows: double-click start.cmd      POSIX shell: ./start.sh
+```
+
+Equivalent manual commands:
+
 ```bash
 npm install          # frontend deps
 npm run tauri dev    # run the desktop app (debug)
 npm run tauri build  # bundle installers
-```
-
-Browser-only development without Rust (in-memory mock data):
-
-```bash
-npm run dev:mock
+npm run dev:mock     # browser-only development (in-memory mock data)
 ```
 
 ## Testing
