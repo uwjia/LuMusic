@@ -312,6 +312,79 @@ impl AudioEngine for RodioEngine {
     }
 }
 
+/// Silent engine used when no output device exists: accepts every command,
+/// never reports end-of-track, so the UI stays usable for library management.
+pub struct NullEngine {
+    volume: f32,
+    path: Option<PathBuf>,
+    loaded: bool,
+    paused: bool,
+}
+
+impl Default for NullEngine {
+    fn default() -> Self {
+        Self {
+            volume: 0.8,
+            path: None,
+            loaded: false,
+            paused: false,
+        }
+    }
+}
+
+impl AudioEngine for NullEngine {
+    fn load_and_play(&mut self, path: &Path) -> Result<(), AudioError> {
+        self.path = Some(path.to_path_buf());
+        self.loaded = true;
+        self.paused = false;
+        Ok(())
+    }
+
+    fn pause(&mut self) {
+        self.paused = true;
+    }
+
+    fn resume(&mut self) {
+        self.paused = false;
+    }
+
+    fn stop(&mut self) {
+        self.loaded = false;
+        self.path = None;
+        self.paused = false;
+    }
+
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
+    }
+
+    fn seek(&mut self, _secs: f64) -> Result<(), AudioError> {
+        Ok(())
+    }
+
+    fn position_secs(&self) -> f64 {
+        0.0
+    }
+
+    fn volume(&self) -> f32 {
+        self.volume
+    }
+
+    fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Always active once loaded so the poller never "auto-advances" through
+    /// the queue of a device-less session.
+    fn is_active(&self) -> bool {
+        self.loaded
+    }
+
+    fn current_path(&self) -> Option<PathBuf> {
+        self.path.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +393,19 @@ mod tests {
     fn audio_error_converts_from_source_error() {
         let err = AudioError::from(SourceError::NoTrack("x.mp3".into()));
         assert!(err.to_string().contains("x.mp3"));
+    }
+
+    #[test]
+    fn null_engine_never_reports_end() {
+        let mut engine = NullEngine::default();
+        engine.set_volume(0.5);
+        engine.load_and_play(Path::new("C:/any.flac")).unwrap();
+        assert!(engine.is_active());
+        engine.pause();
+        assert!(engine.is_paused());
+        assert!(engine.is_active());
+        assert_eq!(engine.volume(), 0.5);
+        engine.stop();
+        assert!(!engine.is_active());
     }
 }

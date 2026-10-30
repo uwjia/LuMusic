@@ -93,7 +93,7 @@ impl SymphoniaSource {
                 &MetadataOptions::default(),
             )
             .map_err(|e| SourceError::Decode(file_name.clone(), e.to_string()))?;
-        let mut format = probed.format;
+        let format = probed.format;
 
         let track = format
             .tracks()

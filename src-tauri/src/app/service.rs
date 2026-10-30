@@ -1,0 +1,793 @@
+//! Player service: orchestrates domain state + infrastructure adapters.
+//!
+//! All adapters are injected as traits, so orchestration behavior (playback
+//! transitions, auto-advance, persistence side effects) is unit-tested with
+//! mocks instead of a real audio device.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use super::dto::{PlaybackStatus, PlayerStateDto};
+use crate::domain::library::{LibraryIndex, TrackQuery};
+use crate::domain::playlist::{PlaylistCollection, PlaylistError, Playlist};
+use crate::domain::queue::{AdvanceOutcome, Queue, RepeatMode};
+use crate::domain::scan::ScanSummary;
+use crate::domain::settings::Settings;
+use crate::domain::track::{Track, TrackId};
+use crate::infra::audio::engine::AudioEngine;
+use crate::infra::fs_scan::LibraryScanner;
+use crate::infra::metadata::MetadataReader;
+use crate::infra::persistence::{Persistence, PersistenceError};
+
+/// Service-level errors surfaced to commands.
+#[derive(Debug, thiserror::Error)]
+pub enum PlayerError {
+    #[error("audio error: {0}")]
+    Audio(#[from] crate::infra::audio::engine::AudioError),
+    #[error("playlist error: {0}")]
+    Playlist(#[from] PlaylistError),
+    #[error("track '{0}' is not in the library")]
+    TrackNotFound(TrackId),
+    #[error("queue is empty")]
+    EmptyQueue,
+    #[error("storage error: {0}")]
+    Storage(#[from] PersistenceError),
+}
+
+/// Result of one background poll tick.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PollOutcome {
+    /// Nothing changed.
+    Unchanged,
+    /// The current track ended and the next one started.
+    Advanced,
+    /// The current track ended and the queue is exhausted.
+    Stopped,
+    /// The next track failed to load; playback stopped.
+    Failed(String),
+}
+
+/// Orchestrator owning all mutable player state behind one lock.
+pub struct PlayerService {
+    engine: Box<dyn AudioEngine>,
+    scanner: Arc<dyn LibraryScanner>,
+    metadata: Arc<dyn MetadataReader>,
+    persistence: Arc<dyn Persistence>,
+
+    library: LibraryIndex,
+    playlists: PlaylistCollection,
+    settings: Settings,
+    queue: Queue,
+    status: PlaybackStatus,
+    /// Monotonic counter feeding the shuffle seed so each toggle differs.
+    shuffle_seed: u64,
+}
+
+impl PlayerService {
+    /// Builds the service and loads persisted library/playlists/settings.
+    pub fn new(
+        engine: Box<dyn AudioEngine>,
+        scanner: Arc<dyn LibraryScanner>,
+        metadata: Arc<dyn MetadataReader>,
+        persistence: Arc<dyn Persistence>,
+    ) -> Result<Self, PlayerError> {
+        let library = persistence.load_library()?.unwrap_or_default();
+        let playlists = persistence.load_playlists()?;
+        let settings = persistence.load_settings()?;
+        let mut service = Self {
+            engine,
+            scanner,
+            metadata,
+            persistence,
+            library,
+            playlists,
+            settings,
+            queue: Queue::new(Vec::new(), None),
+            status: PlaybackStatus::Stopped,
+            shuffle_seed: 0,
+        };
+        service.engine.set_volume(service.settings.volume);
+        Ok(service)
+    }
+
+    // ----- library -----
+
+    /// Clones the scan adapters so heavy IO can run outside the service lock
+    /// (see the `scan_library` command).
+    pub fn adapters(&self) -> (Arc<dyn LibraryScanner>, Arc<dyn MetadataReader>) {
+        (self.scanner.clone(), self.metadata.clone())
+    }
+
+    pub fn query_tracks(&self, query: &TrackQuery) -> Vec<Track> {
+        self.library.query(query).into_iter().cloned().collect()
+    }
+
+    pub fn get_track(&self, id: &str) -> Option<Track> {
+        self.library.get(id).cloned()
+    }
+
+    pub fn library_len(&self) -> usize {
+        self.library.len()
+    }
+
+    /// Scans `root` on the calling thread (used by tests and any caller that
+    /// already owns the lock; the Tauri command runs the phases separately to
+    /// avoid holding the lock during IO).
+    pub fn scan_library(&mut self, root: &Path) -> Result<ScanSummary, PlayerError> {
+        let scanned = self.scanner.scan(root);
+        let files_seen = scanned.files.len();
+        let mut tracks = Vec::with_capacity(files_seen);
+        let mut warnings = scanned.warnings;
+        for path in &scanned.files {
+            match self.metadata.read_track(path) {
+                Ok(track) => tracks.push(track),
+                Err(err) => {
+                    if warnings.len() < 100 {
+                        warnings.push(format!(
+                            "skipped '{}': {err}",
+                            path.display()
+                        ));
+                    }
+                }
+            }
+        }
+        let summary = self.apply_scan(root, files_seen, tracks, warnings);
+        Ok(summary)
+    }
+
+    /// Pure merge step (kept separate for tests): upserts tracks, prunes ids
+    /// that disappeared, persists library + settings.
+    pub fn apply_scan(
+        &mut self,
+        root: &Path,
+        files_seen: usize,
+        tracks: Vec<Track>,
+        warnings: Vec<String>,
+    ) -> ScanSummary {
+        let mut added = 0;
+        let mut updated = 0;
+        let mut keep = std::collections::HashSet::new();
+        for track in tracks {
+            keep.insert(track.id.clone());
+            if self.library.upsert(track) {
+                updated += 1;
+            } else {
+                added += 1;
+            }
+        }
+        let removed = self.library.retain_only(&keep);
+        let summary = ScanSummary {
+            root: root.display().to_string(),
+            files_seen,
+            added,
+            updated,
+            removed,
+            skipped: warnings.len(),
+            warnings,
+        };
+        self.settings.last_folder = Some(root.display().to_string());
+        if let Err(err) = self.persistence.save_library(&self.library) {
+            tracing::warn!("failed to persist library: {err}");
+        }
+        if let Err(err) = self.persistence.save_settings(&self.settings) {
+            tracing::warn!("failed to persist settings: {err}");
+        }
+        summary
+    }
+
+    // ----- playback -----
+
+    /// Loads the track by id into the engine and marks it playing.
+    fn load_track(&mut self, id: &str) -> Result<(), PlayerError> {
+        let track = self
+            .library
+            .get(id)
+            .cloned()
+            .ok_or_else(|| PlayerError::TrackNotFound(id.to_string()))?;
+        self.engine.set_volume(self.settings.volume);
+        self.engine.load_and_play(&track.file_path)?;
+        self.status = PlaybackStatus::Playing;
+        Ok(())
+    }
+
+    /// Replaces the queue with `ids` and starts playing at `start_index`.
+    pub fn play_queue(&mut self, ids: Vec<TrackId>, start_index: Option<usize>) -> Result<(), PlayerError> {
+        if ids.is_empty() {
+            return Err(PlayerError::EmptyQueue);
+        }
+        self.queue.set_items(ids, start_index);
+        let id = self.queue.current().ok_or(PlayerError::EmptyQueue)?;
+        self.load_track(&id)
+    }
+
+    /// Play/pause toggle: pauses when playing, resumes when paused, and
+    /// restarts the queue head when stopped.
+    pub fn toggle(&mut self) -> Result<(), PlayerError> {
+        match self.status {
+            PlaybackStatus::Playing => {
+                self.engine.pause();
+                self.status = PlaybackStatus::Paused;
+                Ok(())
+            }
+            PlaybackStatus::Paused => {
+                self.engine.resume();
+                self.status = PlaybackStatus::Playing;
+                Ok(())
+            }
+            PlaybackStatus::Stopped => {
+                if self.queue.is_empty() {
+                    return Err(PlayerError::EmptyQueue);
+                }
+                let id = self.queue.current().ok_or(PlayerError::EmptyQueue)?;
+                self.load_track(&id)
+            }
+        }
+    }
+
+    pub fn pause(&mut self) {
+        self.engine.pause();
+        if self.status == PlaybackStatus::Playing {
+            self.status = PlaybackStatus::Paused;
+        }
+    }
+
+    pub fn resume(&mut self) {
+        self.engine.resume();
+        if self.status == PlaybackStatus::Paused {
+            self.status = PlaybackStatus::Playing;
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.engine.stop();
+        self.status = PlaybackStatus::Stopped;
+    }
+
+    /// Manual skip (repeat One still advances).
+    pub fn next(&mut self) -> Result<(), PlayerError> {
+        match self.queue.advance(false) {
+            AdvanceOutcome::Playing(id) => self.load_track(&id),
+            AdvanceOutcome::Stopped => {
+                self.stop();
+                Ok(())
+            }
+        }
+    }
+
+    pub fn previous(&mut self) -> Result<(), PlayerError> {
+        match self.queue.previous() {
+            Some(id) => self.load_track(&id),
+            None => Ok(()), // stay on the first track
+        }
+    }
+
+    /// Seeks within the current track; clamped to the known duration.
+    pub fn seek(&mut self, secs: f64) -> Result<(), PlayerError> {
+        let clamped = self
+            .state()
+            .duration_secs
+            .map(|d| secs.clamp(0.0, d))
+            .unwrap_or(secs.max(0.0));
+        self.engine.seek(clamped)?;
+        Ok(())
+    }
+
+    pub fn set_volume(&mut self, volume: f32) -> Result<(), PlayerError> {
+        self.settings.volume = Settings::clamp_volume(volume);
+        self.engine.set_volume(self.settings.volume);
+        self.persistence.save_settings(&self.settings)?;
+        Ok(())
+    }
+
+    pub fn set_shuffle(&mut self, on: bool) {
+        self.shuffle_seed += 1;
+        self.queue.set_shuffle(on, self.shuffle_seed);
+    }
+
+    pub fn set_repeat(&mut self, mode: RepeatMode) {
+        self.queue.set_repeat(mode);
+    }
+
+    /// Background tick: detects the end of the current track and follows the
+    /// queue rules (repeat One replays, repeat All wraps, otherwise next).
+    pub fn poll(&mut self) -> PollOutcome {
+        if self.status != PlaybackStatus::Playing {
+            return PollOutcome::Unchanged;
+        }
+        if self.engine.is_active() {
+            return PollOutcome::Unchanged;
+        }
+        match self.queue.advance(true) {
+            AdvanceOutcome::Playing(id) => match self.load_track(&id) {
+                Ok(()) => PollOutcome::Advanced,
+                Err(err) => {
+                    tracing::error!("auto-advance failed: {err}");
+                    self.stop();
+                    PollOutcome::Failed(err.to_string())
+                }
+            },
+            AdvanceOutcome::Stopped => {
+                self.stop();
+                PollOutcome::Stopped
+            }
+        }
+    }
+
+    /// Snapshot for the UI.
+    pub fn state(&self) -> PlayerStateDto {
+        let current_track = self
+            .queue
+            .current()
+            .and_then(|id| self.library.get(&id).cloned());
+        PlayerStateDto {
+            status: self.status,
+            duration_secs: current_track.as_ref().and_then(|t| t.duration_secs),
+            current_track,
+            queue_position: self.queue.current_item_index(),
+            queue_len: self.queue.len(),
+            position_secs: self.engine.position_secs(),
+            volume: self.settings.volume,
+            shuffle: self.queue.shuffle(),
+            repeat: self.queue.repeat(),
+        }
+    }
+
+    // ----- playlists -----
+
+    pub fn playlists(&self) -> Vec<Playlist> {
+        self.playlists.list().into_iter().cloned().collect()
+    }
+
+    pub fn create_playlist(&mut self, name: &str) -> Result<Playlist, PlayerError> {
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let id = format!("pl-{created_at}-{}", self.playlists.len());
+        let playlist = self.playlists.create(name, id, created_at)?;
+        self.persist_playlists()?;
+        Ok(playlist)
+    }
+
+    pub fn rename_playlist(&mut self, id: &str, new_name: &str) -> Result<(), PlayerError> {
+        self.playlists.rename(id, new_name)?;
+        self.persist_playlists()?;
+        Ok(())
+    }
+
+    pub fn delete_playlist(&mut self, id: &str) -> Result<(), PlayerError> {
+        self.playlists.delete(id)?;
+        self.persist_playlists()?;
+        Ok(())
+    }
+
+    pub fn add_track_to_playlist(&mut self, id: &str, track: TrackId) -> Result<bool, PlayerError> {
+        let added = self.playlists.add_track(id, track)?;
+        self.persist_playlists()?;
+        Ok(added)
+    }
+
+    pub fn remove_track_from_playlist(&mut self, id: &str, track: &str) -> Result<(), PlayerError> {
+        self.playlists.remove_track(id, track)?;
+        self.persist_playlists()?;
+        Ok(())
+    }
+
+    pub fn move_track_in_playlist(&mut self, id: &str, from: usize, to: usize) -> Result<(), PlayerError> {
+        self.playlists.move_track(id, from, to)?;
+        self.persist_playlists()?;
+        Ok(())
+    }
+
+    /// Resolves playlist entries to tracks (missing files are skipped).
+    pub fn playlist_tracks(&self, id: &str) -> Option<Vec<Track>> {
+        self.playlists
+            .get(id)
+            .map(|p| p.items.iter().filter_map(|t| self.library.get(t).cloned()).collect())
+    }
+
+    fn persist_playlists(&mut self) -> Result<(), PlayerError> {
+        self.persistence.save_playlists(&self.playlists)?;
+        Ok(())
+    }
+
+    // ----- settings -----
+
+    pub fn settings(&self) -> Settings {
+        self.settings.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::fs_scan::ScannedFiles;
+    use crate::infra::metadata::MetadataError;
+    use crate::infra::persistence::JsonPersistence;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    // ---------- mocks ----------
+
+    struct MockScanner {
+        files: Mutex<Vec<PathBuf>>,
+    }
+
+    impl LibraryScanner for MockScanner {
+        fn scan(&self, root: &Path) -> ScannedFiles {
+            // Only return the configured files when scanning our fake root.
+            let _ = root;
+            ScannedFiles {
+                files: self.files.lock().unwrap().clone(),
+                warnings: Vec::new(),
+            }
+        }
+    }
+
+    struct MockMetadata;
+
+    impl MetadataReader for MockMetadata {
+        fn read_track(&self, path: &Path) -> Result<Track, MetadataError> {
+            // Deterministic: title from stem, 10s duration.
+            let mut track = Track::from_stem(path, 1);
+            track.duration_secs = Some(10.0);
+            Ok(track)
+        }
+    }
+
+    #[derive(Default, Clone)]
+    struct MockEngineState {
+        log: Vec<String>,
+        active: bool,
+        paused: bool,
+        volume: f32,
+        path: Option<PathBuf>,
+        position: f64,
+    }
+
+    struct MockEngine {
+        state: Arc<Mutex<MockEngineState>>,
+        /// Simulates "track finished" after N is_active() calls while playing.
+        finish_after_polls: u32,
+    }
+
+    impl MockEngine {
+        // `state` is accessed directly by tests through the cloned Arc.
+    }
+
+    impl AudioEngine for MockEngine {
+        fn load_and_play(&mut self, path: &Path) -> Result<(), crate::infra::audio::engine::AudioError> {
+            let mut s = self.state.lock().unwrap();
+            s.log.push(format!("open:{}", path.display()));
+            s.active = true;
+            s.paused = false;
+            s.position = 0.0;
+            s.path = Some(path.to_path_buf());
+            Ok(())
+        }
+        fn pause(&mut self) {
+            let mut s = self.state.lock().unwrap();
+            s.log.push("pause".into());
+            s.paused = true;
+        }
+        fn resume(&mut self) {
+            let mut s = self.state.lock().unwrap();
+            s.log.push("resume".into());
+            s.paused = false;
+        }
+        fn stop(&mut self) {
+            let mut s = self.state.lock().unwrap();
+            s.log.push("stop".into());
+            s.active = false;
+            s.paused = false;
+            s.path = None;
+        }
+        fn set_volume(&mut self, volume: f32) {
+            self.state.lock().unwrap().volume = volume;
+        }
+        fn seek(&mut self, secs: f64) -> Result<(), crate::infra::audio::engine::AudioError> {
+            let mut s = self.state.lock().unwrap();
+            s.log.push(format!("seek:{secs:.1}"));
+            s.position = secs;
+            Ok(())
+        }
+        fn position_secs(&self) -> f64 {
+            self.state.lock().unwrap().position
+        }
+        fn volume(&self) -> f32 {
+            self.state.lock().unwrap().volume
+        }
+        fn is_paused(&self) -> bool {
+            self.state.lock().unwrap().paused
+        }
+        fn is_active(&self) -> bool {
+            let mut s = self.state.lock().unwrap();
+            if s.active && self.finish_after_polls > 0 {
+                s.active = false; // simulate end of track on first poll
+            }
+            s.active
+        }
+        fn current_path(&self) -> Option<PathBuf> {
+            self.state.lock().unwrap().path.clone()
+        }
+    }
+
+    // ---------- helpers ----------
+
+    /// Service with two fake tracks (a.mp3, b.mp3) plus engine state handle.
+    fn service_with_tracks() -> (PlayerService, Arc<Mutex<MockEngineState>>, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let files = vec![PathBuf::from("C:/lib/a.mp3"), PathBuf::from("C:/lib/b.mp3")];
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let engine = MockEngine {
+            state: engine_state.clone(),
+            finish_after_polls: 0,
+        };
+        let mut service = PlayerService::new(
+            Box::new(engine),
+            Arc::new(MockScanner {
+                files: Mutex::new(files),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(JsonPersistence::new(dir.path())),
+        )
+        .unwrap();
+        service.scan_library(Path::new("C:/lib")).unwrap();
+        (service, engine_state, dir)
+    }
+
+    fn log_of(state: &Arc<Mutex<MockEngineState>>) -> Vec<String> {
+        state.lock().unwrap().log.clone()
+    }
+
+    // ---------- library / persistence ----------
+
+    #[test]
+    fn scan_counts_added_updated_and_prunes_missing() {
+        let (mut service, _state, _dir) = service_with_tracks();
+        assert_eq!(service.library_len(), 2);
+
+        // Second scan sees only b.mp3 -> a.mp3 is pruned by the merge step.
+        let summary = apply_scan_of(&mut service, &["C:/lib/b.mp3"]);
+        assert_eq!(summary.removed, 1);
+        assert_eq!(service.library_len(), 1);
+        assert!(service.get_track("C:/lib/a.mp3").is_none());
+    }
+
+    /// Feeds files through the scan merge step (`apply_scan`), which is the
+    /// pruning behavior under test.
+    fn apply_scan_of(service: &mut PlayerService, files: &[&str]) -> ScanSummary {
+        let tracks: Vec<Track> = files
+            .iter()
+            .map(|f| {
+                let mut t = Track::from_stem(Path::new(f), 1);
+                t.duration_secs = Some(10.0);
+                t
+            })
+            .collect();
+        service.apply_scan(Path::new("C:/lib"), files.len(), tracks, Vec::new())
+    }
+
+    #[test]
+    fn state_survives_service_restart() {
+        let (service, _engine, dir) = service_with_tracks();
+        drop(service);
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let reloaded = PlayerService::new(
+            Box::new(MockEngine {
+                state: engine_state,
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(JsonPersistence::new(dir.path())),
+        )
+        .unwrap();
+        assert_eq!(reloaded.library_len(), 2);
+        assert_eq!(reloaded.settings().last_folder.as_deref(), Some("C:/lib"));
+    }
+
+    // ---------- playback transitions ----------
+
+    #[test]
+    fn play_pause_resume_stop_drive_engine() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        assert_eq!(service.state().status, PlaybackStatus::Stopped);
+
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0))
+            .unwrap();
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/a.mp3");
+
+        service.toggle().unwrap(); // playing -> paused
+        assert_eq!(service.state().status, PlaybackStatus::Paused);
+        service.toggle().unwrap(); // paused -> playing
+        service.pause();
+        service.resume();
+        service.stop();
+        assert_eq!(service.state().status, PlaybackStatus::Stopped);
+        assert_eq!(
+            log_of(&engine),
+            vec![
+                "open:C:/lib/a.mp3",
+                "pause",
+                "resume",
+                "pause",
+                "resume",
+                "stop"
+            ]
+        );
+    }
+
+    #[test]
+    fn toggle_from_stopped_replays_queue_head() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None)
+            .unwrap();
+        service.stop();
+        service.toggle().unwrap();
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+        assert_eq!(log_of(&engine).last().unwrap(), "open:C:/lib/a.mp3");
+    }
+
+    #[test]
+    fn empty_queue_is_rejected() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        assert!(matches!(
+            service.play_queue(vec![], None),
+            Err(PlayerError::EmptyQueue)
+        ));
+        assert!(matches!(
+            service.toggle(),
+            Err(PlayerError::EmptyQueue)
+        ));
+    }
+
+    #[test]
+    fn missing_track_reports_track_not_found() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        assert!(matches!(
+            service.play_queue(vec!["C:/lib/ghost.mp3".into()], None),
+            Err(PlayerError::TrackNotFound(_))
+        ));
+    }
+
+    // ---------- auto advance ----------
+
+    #[test]
+    fn poll_advances_to_next_and_stops_at_end() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        // Engine finishes a track on the first is_active() poll.
+        let engine = MockEngine {
+            state: engine_state.clone(),
+            finish_after_polls: 1,
+        };
+        let mut service = PlayerService::new(
+            Box::new(engine),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![PathBuf::from("C:/x/a.mp3"), PathBuf::from("C:/x/b.mp3")]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(JsonPersistence::new(dir.path())),
+        )
+        .unwrap();
+        service.scan_library(Path::new("C:/x")).unwrap();
+        service
+            .play_queue(vec!["C:/x/a.mp3".into(), "C:/x/b.mp3".into()], Some(0))
+            .unwrap();
+
+        // First poll: a.mp3 "finished" -> b.mp3 starts.
+        assert_eq!(service.poll(), PollOutcome::Advanced);
+        assert_eq!(service.state().current_track.unwrap().id, "C:/x/b.mp3");
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+
+        // Second poll: b.mp3 finished -> queue exhausted -> stop.
+        assert_eq!(service.poll(), PollOutcome::Stopped);
+        assert_eq!(service.state().status, PlaybackStatus::Stopped);
+        assert_eq!(log_of(&engine_state).last().unwrap(), "stop");
+    }
+
+    #[test]
+    fn poll_replays_track_with_repeat_one() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        service.set_repeat(RepeatMode::One);
+        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        // Simulate end of track.
+        engine_set_active(&engine, false);
+        assert_eq!(service.poll(), PollOutcome::Advanced);
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/a.mp3");
+        assert_eq!(
+            log_of(&engine).iter().filter(|l| l.starts_with("open")).count(),
+            2
+        );
+    }
+
+    fn engine_set_active(engine: &Arc<Mutex<MockEngineState>>, active: bool) {
+        engine.lock().unwrap().active = active;
+    }
+
+    #[test]
+    fn poll_is_noop_when_not_playing() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service.pause();
+        engine_set_active(&engine, false);
+        assert_eq!(service.poll(), PollOutcome::Unchanged);
+    }
+
+    // ---------- volume / seek ----------
+
+    #[test]
+    fn set_volume_applies_clamps_and_persists() {
+        let (mut service, engine, dir) = service_with_tracks();
+        service.set_volume(2.0).unwrap();
+        assert_eq!(service.state().volume, 1.0);
+        assert_eq!(engine.lock().unwrap().volume, 1.0);
+        assert_eq!(
+            JsonPersistence::new(dir.path()).load_settings().unwrap().volume,
+            1.0
+        );
+    }
+
+    #[test]
+    fn seek_is_clamped_to_duration() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service.seek(99.0).unwrap(); // duration is 10s from MockMetadata
+        assert_eq!(log_of(&engine).last().unwrap(), "seek:10.0");
+    }
+
+    // ---------- playlists ----------
+
+    #[test]
+    fn playlist_crud_via_service_persists_and_validates() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        let playlist = service.create_playlist("Chill").unwrap();
+        assert!(service.add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into()).unwrap());
+        assert!(!service.add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into()).unwrap()); // no dupes
+        let tracks = service.playlist_tracks(&playlist.id).unwrap();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "C:/lib/a.mp3");
+
+        // Duplicate names rejected.
+        assert!(matches!(
+            service.create_playlist("chill"),
+            Err(PlayerError::Playlist(PlaylistError::DuplicateName(_)))
+        ));
+
+        // Survives restart (persisted).
+        drop(service);
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let reloaded = PlayerService::new(
+            Box::new(MockEngine {
+                state: engine_state,
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(JsonPersistence::new(dir.path())),
+        )
+        .unwrap();
+        assert_eq!(reloaded.playlists().len(), 1);
+        assert_eq!(reloaded.playlists()[0].items, vec!["C:/lib/a.mp3".to_string()]);
+    }
+
+    // ---------- shuffle wiring ----------
+
+    #[test]
+    fn shuffle_toggle_changes_queue_mode() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        assert!(!service.state().shuffle);
+        service.set_shuffle(true);
+        assert!(service.state().shuffle);
+        service.set_repeat(RepeatMode::All);
+        assert_eq!(service.state().repeat, RepeatMode::All);
+    }
+}
