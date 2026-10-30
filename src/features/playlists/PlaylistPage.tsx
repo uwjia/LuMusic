@@ -1,6 +1,7 @@
 // Playlist detail page: play the playlist, remove/reorder entries.
+// Playlist-level actions (rename / duplicate / delete) live in the sidebar's
+// right-click menu, so the header only identifies the playlist.
 
-import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useTranslation } from '@/i18n';
 import { displayPlaylistName } from '@/lib/playlistDisplay';
@@ -13,12 +14,8 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   const tracks = usePlaylistStore((s) => s.selectedTracks);
   const playerState = usePlayerStore((s) => s.state);
   const error = usePlaylistStore((s) => s.error);
-  const { removeTrack, remove, rename, duplicate } = usePlaylistStore.getState();
+  const { removeTrack } = usePlaylistStore.getState();
   const { t } = useTranslation();
-
-  // Inline rename editor state in the page header.
-  const [editing, setEditing] = useState(false);
-  const [draftName, setDraftName] = useState('');
 
   const playlist = playlists.find((p) => p.id === playlistId);
   if (!playlist) {
@@ -31,74 +28,15 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
     );
   }
 
-  const submitRename = async () => {
-    const trimmed = draftName.trim();
-    // Unchanged or empty input just closes the editor — nothing to save.
-    if (trimmed === '' || trimmed === playlist.name) {
-      setEditing(false);
-      return;
-    }
-    const ok = await rename(playlist.id, trimmed);
-    // On failure keep the editor open so the error (duplicate/empty name)
-    // renders next to it and the name can be corrected.
-    if (ok) setEditing(false);
-  };
-
   return (
     <section className="page" data-testid="playlist-page">
       <header className="page-header">
-        {editing ? (
-          <form
-            className="header-rename"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submitRename();
-            }}
-          >
-            <input
-              autoFocus
-              aria-label={t('playlist.nameLabel')}
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Escape' && setEditing(false)}
-            />
-            <Button variant="primary" type="submit">
-              {t('playlist.save')}
-            </Button>
-            <Button onClick={() => setEditing(false)}>{t('playlist.cancel')}</Button>
-          </form>
-        ) : (
-          <>
-            <h2>{displayPlaylistName(playlist, t)}</h2>
-            <span className="muted">
-              {tracks.length === 1
-                ? t('playlist.trackCountOne', { count: tracks.length })
-                : t('playlist.trackCount', { count: tracks.length })}
-            </span>
-          </>
-        )}
-        <div className="header-actions">
-          <Button
-            onClick={() => {
-              // Seed the editor with the canonical stored name, never the
-              // localized display name: saving the latter would persist a
-              // translated name and break the rescan overwrite semantics.
-              setDraftName(playlist.name);
-              setEditing(true);
-            }}
-          >
-            {t('playlist.rename')}
-          </Button>
-          <Button onClick={() => void duplicate(playlist.id)}>{t('playlist.duplicate')}</Button>
-          <Button
-            className="danger"
-            onClick={() => {
-              void remove(playlist.id);
-            }}
-          >
-            {t('playlist.delete')}
-          </Button>
-        </div>
+        <h2>{displayPlaylistName(playlist, t)}</h2>
+        <span className="muted">
+          {tracks.length === 1
+            ? t('playlist.trackCountOne', { count: tracks.length })
+            : t('playlist.trackCount', { count: tracks.length })}
+        </span>
       </header>
 
       {error ? (

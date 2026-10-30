@@ -69,7 +69,7 @@ export const en = {
   'playlist.trackCountOne': '{count} track',
   'playlist.nameLabel': 'Playlist name',
   'playlist.save': 'Save',
-  'playlist.cancel': 'Cancel',
+  'playlist.actions': 'Playlist actions',
   'playlist.rename': 'Rename',
   'playlist.duplicate': 'Duplicate',
   'playlist.delete': 'Delete playlist',

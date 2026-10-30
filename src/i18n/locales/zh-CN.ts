@@ -69,7 +69,7 @@ export const zhCN: Record<MessageKey, string> = {
   'playlist.trackCountOne': '{count} 首曲目',
   'playlist.nameLabel': '歌单名称',
   'playlist.save': '保存',
-  'playlist.cancel': '取消',
+  'playlist.actions': '歌单操作',
   'playlist.rename': '重命名',
   'playlist.duplicate': '创建副本',
   'playlist.delete': '删除歌单',
