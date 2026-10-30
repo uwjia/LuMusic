@@ -107,7 +107,9 @@ impl PlaylistCollection {
     /// - existing auto playlists with the same id are updated in place;
     /// - manual playlists are never modified or removed;
     /// - if a *manual* playlist already owns a planned name, the auto
-    ///   playlist for that name is skipped (user data wins).
+    ///   playlist keeps its id but renames itself with a `(folder)` suffix -
+    ///   it must never silently disappear from the sidebar. Once the manual
+    ///   playlist is renamed/deleted, the next scan restores the plain name.
     ///
     /// Returns true when the collection changed.
     pub fn sync_auto(&mut self, specs: &[AutoPlaylistSpec], now: u64) -> bool {
@@ -117,18 +119,25 @@ impl PlaylistCollection {
             .retain(|_, p| !p.auto_generated || planned_ids.contains(&p.id));
 
         let mut changed = before != self.playlists.len();
+        // Manual playlist names are unique case-insensitively; mirror that
+        // when detecting collisions.
+        let manual_names: HashSet<String> = self
+            .playlists
+            .values()
+            .filter(|p| !p.auto_generated)
+            .map(|p| p.name.to_lowercase())
+            .collect();
+
         for spec in specs {
-            let name_taken_by_manual = self
-                .playlists
-                .values()
-                .any(|p| !p.auto_generated && p.id != spec.id && p.name.eq_ignore_ascii_case(&spec.name));
-            if name_taken_by_manual {
-                continue;
-            }
+            let name = if manual_names.contains(&spec.name.to_lowercase()) {
+                format!("{} (folder)", spec.name)
+            } else {
+                spec.name.clone()
+            };
             match self.playlists.get_mut(&spec.id) {
                 Some(existing) if existing.auto_generated => {
-                    if existing.name != spec.name || existing.items != spec.items {
-                        existing.name = spec.name.clone();
+                    if existing.name != name || existing.items != spec.items {
+                        existing.name = name;
                         existing.items = spec.items.clone();
                         changed = true;
                     }
@@ -139,7 +148,7 @@ impl PlaylistCollection {
                         spec.id.clone(),
                         Playlist {
                             id: spec.id.clone(),
-                            name: spec.name.clone(),
+                            name,
                             items: spec.items.clone(),
                             created_at: now,
                             auto_generated: true,
@@ -368,11 +377,21 @@ mod tests {
     fn sync_auto_never_touches_manual_playlists() {
         let mut c = PlaylistCollection::new();
         c.create("All Tracks", "manual".into(), 1).unwrap();
-        // A manual playlist already owns the name: the auto one is skipped.
+        // A manual playlist owns the name: the auto one must still exist (it
+        // renames itself) instead of silently disappearing.
         c.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
-        assert_eq!(c.len(), 1);
+        assert_eq!(c.len(), 2);
+        assert_eq!(c.get("auto:all").unwrap().name, "All Tracks (folder)");
+        assert_eq!(c.get("auto:all").unwrap().items, vec!["a".to_string()]);
+        // The manual playlist is untouched.
+        assert_eq!(c.get("manual").unwrap().name, "All Tracks");
         assert_eq!(c.get("manual").unwrap().items, Vec::<String>::new());
         assert!(!c.get("manual").unwrap().auto_generated);
+
+        // Once the collision is gone, the auto playlist takes the plain name.
+        c.rename("manual", "My Picks").unwrap();
+        c.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 3);
+        assert_eq!(c.get("auto:all").unwrap().name, "All Tracks");
 
         // A manual playlist cannot be hijacked even if it uses an auto id.
         let mut c2 = PlaylistCollection::new();
@@ -389,6 +408,14 @@ mod tests {
         c2.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
         assert_eq!(c2.get("auto:all").unwrap().name, "Mine");
         assert_eq!(c2.get("auto:all").unwrap().items, vec!["z".to_string()]);
+    }
+
+    #[test]
+    fn sync_auto_collision_is_case_insensitive() {
+        let mut c = PlaylistCollection::new();
+        c.create("VAMPIRE", "m".into(), 1).unwrap();
+        c.sync_auto(&[spec("auto:dir:v", "vampire", &["a"])], 2);
+        assert_eq!(c.get("auto:dir:v").unwrap().name, "vampire (folder)");
     }
 
     #[test]
