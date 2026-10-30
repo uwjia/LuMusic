@@ -50,13 +50,9 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
                   type="button"
                   className={`nav-item ${view.kind === 'playlist' && view.id === playlist.id ? 'is-active' : ''}`}
                   onClick={() => {
+                    // Single click only opens the playlist view; playback
+                    // starts by double-clicking a row in the playlist page.
                     void select(playlist.id);
-                    // Single click plays the playlist from the top; the
-                    // transport bar's repeat/shuffle controls then decide
-                    // sequential / all-loop / single-loop behavior.
-                    if (playlist.items.length > 0) {
-                      void usePlayerStore.getState().load(playlist.items, 0);
-                    }
                     onNavigate({ kind: 'playlist', id: playlist.id });
                   }}
                 >

@@ -13,8 +13,8 @@ strictly layered architecture and tests accompanying every behavior.
 - Playlists: create, rename, delete, add/remove/reorder tracks
 - Auto playlists from the folder structure: one playlist per first-level
   folder, root-level files go to `Default`, everything into `All Tracks`;
-  single-clicking a playlist plays it (sequential / loop-all / loop-one via
-  the transport bar)
+  clicking a playlist opens it, double-clicking a row plays it (sequential /
+  loop-all / loop-one via the transport bar)
 - State persisted across restarts (library cache, playlists, volume, last folder)
 - Progress/state pushed to the UI via Tauri events (~4 Hz progress, event-driven state)
 

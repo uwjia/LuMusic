@@ -58,18 +58,12 @@ describe('Sidebar', () => {
     expect(screen.getByText('2')).toBeInTheDocument(); // Chill count
   });
 
-  it('clicking a playlist selects, plays it from the top and navigates', async () => {
+  it('clicking a playlist selects and navigates without starting playback', async () => {
     render(<Sidebar view={{ kind: 'library' }} onNavigate={onNavigate} />);
     fireEvent.click(screen.getByText('Chill'));
     await vi.waitFor(() => expect(api.playlistGetTracks).toHaveBeenCalledWith('p1'));
-    expect(api.playerLoad).toHaveBeenCalledWith(['a', 'b'], 0);
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'playlist', id: 'p1' });
-  });
-
-  it('clicking an empty playlist navigates without starting playback', async () => {
-    render(<Sidebar view={{ kind: 'library' }} onNavigate={onNavigate} />);
-    fireEvent.click(screen.getByText('Focus'));
-    await vi.waitFor(() => expect(onNavigate).toHaveBeenCalledWith({ kind: 'playlist', id: 'p2' }));
+    // Navigating must never hijack playback - rows are played by double-click.
     expect(api.playerLoad).not.toHaveBeenCalled();
   });
 
