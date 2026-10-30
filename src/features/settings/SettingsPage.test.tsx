@@ -82,7 +82,7 @@ describe('SettingsPage language switcher', () => {
 });
 
 describe('SettingsPage scan section', () => {
-  it('renders the last scan summary with counts', () => {
+  it('renders the last scan summary with root and stat chips', () => {
     useLibraryStore.setState({
       lastScan: {
         root: 'C:/Music',
@@ -95,8 +95,11 @@ describe('SettingsPage scan section', () => {
       },
     });
     render(<SettingsPage />);
-    expect(screen.getByTestId('scan-summary')).toHaveTextContent('6 added');
-    expect(screen.getByTestId('scan-summary')).toHaveTextContent('C:/Music');
+    const summary = screen.getByTestId('scan-summary');
+    expect(summary).toHaveTextContent('C:/Music');
+    expect(summary).toHaveTextContent('10 files');
+    expect(summary).toHaveTextContent('6 added');
+    expect(summary).toHaveTextContent('1 removed');
   });
 
   it('disables scanning while a scan is in progress and shows the busy label', () => {
@@ -105,6 +108,15 @@ describe('SettingsPage scan section', () => {
     const button = screen.getByTestId('scan-button') as HTMLButtonElement;
     expect(button).toBeDisabled();
     expect(button).toHaveTextContent('Scanning…');
+    expect(screen.getByTestId('scan-progress')).toHaveTextContent('1/9');
+  });
+});
+
+describe('SettingsPage about section', () => {
+  it('shows the app name with a version badge', async () => {
+    render(<SettingsPage />);
+    expect(await screen.findByText('LuMusic')).toBeInTheDocument();
+    expect(screen.getByTestId('about-version')).toHaveTextContent('v0.1.0');
   });
 });
 
