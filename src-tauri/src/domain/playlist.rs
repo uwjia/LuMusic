@@ -33,7 +33,7 @@ pub struct Playlist {
 }
 
 /// Collection of playlists ordered by name (BTreeMap keeps it sorted).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlaylistCollection {
     playlists: BTreeMap<String, Playlist>,
 }

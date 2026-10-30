@@ -11,6 +11,7 @@
 pub mod app;
 pub mod domain;
 pub mod events;
+pub mod infra;
 
 /// Boots the Tauri application: plugins, state, command handlers.
 pub fn run() {

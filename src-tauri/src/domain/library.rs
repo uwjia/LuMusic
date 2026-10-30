@@ -17,7 +17,7 @@ pub struct TrackQuery {
 }
 
 /// In-memory track catalog keyed by `TrackId`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LibraryIndex {
     tracks: BTreeMap<TrackId, Track>,
 }
