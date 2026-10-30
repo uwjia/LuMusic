@@ -1,0 +1,106 @@
+# AGENTS.md — LuMusic 工程约定
+
+面向 AI 编码代理与新成员的项目约定。**改动代码前请先阅读本文**；与 README.md 冲突时以本文为准。
+
+## 项目概览
+
+本地音乐播放器：**Rust (Tauri 2) + React 19 + Vite + zustand**，严格分层、零冗余依赖、行为必有测试。界面支持 简体中文 / English。
+
+## 常用命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run check` | **完整质量门**：typecheck + vitest + cargo test，改动的收尾标准 |
+| `npm run typecheck` | TS 严格模式双 tsconfig 检查（`tsconfig.json` / `tsconfig.node.json`） |
+| `npm run test` / `test:watch` | 前端 vitest（jsdom） |
+| `npm run test:rust` | 后端 cargo test |
+| `npm run dev:mock` | 纯浏览器开发（内存 mock 数据，无需 Rust 工具链） |
+| `npm run tauri dev` / `build` | 桌面应用调试 / 打包 |
+| `npm start [-- --mock\|--build\|--check]` | 一键启动器（亦可用 `start.cmd` / `start.sh`） |
+
+Windows 环境：shell 命令在 Git Bash 下执行，路径用正斜杠。
+
+## 分层架构 — 依赖只能向下
+
+### 前端 `src/`
+
+```text
+features/    UI 模块（library、player、playlists、settings、shell）
+components/  通用 UI 基础件（Button、Slider、EmptyState…）
+stores/      zustand store —— 所有后端调用必须经过 api/
+api/         PlayerApi 接口 + tauri 实现 + mock 实现（UI 与后端的唯一接缝）
+i18n/        locale store + en / zh-CN 文案词典
+hooks/       事件桥（Tauri 事件 → store）
+lib/         纯函数工具（如 formatDuration）
+types/       与 Rust serde 对应的 DTO
+```
+
+**规则：**
+
+- UI 代码**禁止**直接 `import '@tauri-apps/api/...'`；一律走 `@/api` 或 `@/api/window`（`windowApi` 在浏览器/测试中自动降级为 stub）。
+- `@/api/mock.ts` 必须镜像后端可观察语义（搜索 AND 匹配、自动前进、同名播放列表覆盖等），保证组件测试与 `dev:mock` 永不触达 Tauri IPC。
+- store 中不得出现 UI 逻辑；需要进入组件状态的数据流经 store（播放/曲库/播放列表），一次性读取（如 `settingsGet` / `appInfo`）可在组件 effect 中直接调 api。
+
+### 后端 `src-tauri/src/`
+
+```text
+app/     薄 Tauri 命令 + PlayerService 编排 + poller 线程（自动前进/进度事件）
+infra/   trait 之后的 IO 适配器：fs_scan(walkdir)、metadata(lofty)、
+         audio(symphonia 解码 + rodio 输出)、persistence(JSON)
+domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Playlists、
+         扫描规则、编码修复 —— 零 IO
+```
+
+**规则：**
+
+- `domain/` 不允许任何 IO/异步；可测逻辑优先下沉到 domain。
+- rodio 输出非 `Send`：音频引擎独占线程，经 channel proxy 暴露（`infra/audio/engine.rs`）。
+- 扫描重阶段（遍历 + 读标签）不持服务锁，仅合并步骤短暂加锁，**扫描不阻塞播放**。
+- 自动播放列表名（`All Tracks` / `Default`）由 `domain/scan.rs` 常量生成并持久化（同名覆盖语义），**后端始终存 canonical 英文名**。前端经 `@/lib/playlistDisplay` 按稳定 ID（`auto:all` / `auto:root`）做**显示层翻译**；不得把本地化名写回后端（重命名编辑器预填 canonical 名）。
+
+## 测试规范
+
+**铁律：任何行为变更必须附带钉住该行为的测试；`npm run check` 全绿才算完成。**
+
+| 层 | 风格 |
+| --- | --- |
+| `domain` | 纯单元测试（固定种子的 shuffle、循环边界、修剪） |
+| `infra` | 真实 fixture（`tempfile`/`hound`：WAV 解码、seek） |
+| `app`（PlayerService） | mock scanner/metadata/persistence/**audio engine** |
+| stores / hooks | vitest，在接缝处 `vi.mock('@/api', ...)`，store 状态用 `setState` 直播种 |
+| components | testing-library 表达**用户行为**（双击播放、滑块 `change`+`pointerUp` 提交），定位优先 `data-testid` |
+
+前端测试注意：
+
+- 环境 jsdom；`vitest.setup.ts` 已桩掉 `ResizeObserver` 并给 `.track-body` 假尺寸——虚拟化表格依赖它，勿删。
+- 跨 store 的组件测试（如 Sidebar）需同时 reset 相关 store 与 mock 的 `api`。
+- 现有规模：**121 前端 + 90 后端**；新增行为时保持各层均有覆盖，而非只补一层。
+
+## 工程约束
+
+### 导入路径 — 强制 `@` 别名
+
+- `@` → `src/`，配置在 `tsconfig.json`（`paths`）与 `vite.config.ts`（`resolve.alias`）。
+- **禁止相对路径导入**：`../x`、`../../x`、同目录 `./x` 一律写成 `@/...`（如 `@/api`、`@/features/library/TrackTable`、`@/styles/global.css`）。
+- 覆盖三类写法：`from '...'`、副作用 `import '...'`、以及测试里的 **`vi.mock('@/api', ...)` 字符串**。
+- 新文件落位后，导入一律从 `@/` 起写。
+
+### 国际化（i18n）
+
+- **所有用户可见文案必须来自 `@/i18n` 词典，禁止在组件中硬编码字符串**（含 `aria-label`、`placeholder`、`title`）。示例文件路径 `C:\Users\me\Music` 这类 locale 无关字面量除外。
+- 词典为扁平点分键（`library.searchPlaceholder`）；`en` 是源头，`zh-CN` 必须键集一致——`Record<MessageKey, string>` 类型强制，漏译/多译无法通过 typecheck。
+- 参数插值用 `{count}` 风格；英文单复数用成对键（`trackCount` / `trackCountOne`），中文两键同值。
+- 组件内用 `useTranslation()`（locale 切换自动重渲染）；store / 非组件模块用非响应式 `t()`。
+- 语言检测优先级：localStorage（`lumusic.language`）> 系统 `zh*` → zh-CN > `en`；切换入口在设置页，同时持久化并同步 `<html lang>`。
+- 已知边界（暂不翻译，勿“顺手”处理）：后端错误消息（需错误码改造）、自动播放列表的文件夹名（`auto:dir:*`，是用户数据名）。固定自动歌单（`All Tracks` / `Default`）例外——经 `@/lib/playlistDisplay` 按稳定 ID 做显示层翻译，存储名不变。
+
+### 依赖与风格
+
+- **零冗余依赖**：i18n 为自研（勿引入 i18next 等）；zustand/react-virtual 之外的新依赖需充分理由。
+- TS `strict` 全开；无 ESLint/Prettier 配置，`npm run typecheck` 即静态门禁。
+- 风格：单引号、分号、2 空格缩进、尾逗号；注释写"为什么"而非"是什么"。
+- 提交信息：Conventional Commits，**只能使用英文**（标题与正文均不得出现中文，含示例名、文件名等一律英文），如 `feat(playlists): add context menu`、`fix(scan): follow symlinks`。
+
+### Non-goals（当前不做）
+
+歌词、均衡器、无缝播放、标签编辑、封面提取。遇到相关需求先确认范围。
