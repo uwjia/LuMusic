@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use crate::domain::library::LibraryIndex;
 use crate::domain::playlist::PlaylistCollection;
+use crate::domain::session::PlaybackSession;
 use crate::domain::settings::Settings;
 
 /// Errors produced by the persistence layer.
@@ -33,6 +34,11 @@ pub trait Persistence: Send + Sync {
     fn save_playlists(&self, playlists: &PlaylistCollection) -> Result<(), PersistenceError>;
     fn load_settings(&self) -> Result<Settings, PersistenceError>;
     fn save_settings(&self, settings: &Settings) -> Result<(), PersistenceError>;
+    fn load_playback(&self) -> Result<Option<PlaybackSession>, PersistenceError>;
+    fn save_playback(&self, session: &PlaybackSession) -> Result<(), PersistenceError>;
+    /// Removes the persisted session; used when playback ends for good so
+    /// the next launch does not resurrect a finished session.
+    fn clear_playback(&self) -> Result<(), PersistenceError>;
 }
 
 /// JSON-file backed store inside a single directory.
@@ -101,6 +107,23 @@ impl Persistence for JsonPersistence {
     fn save_settings(&self, settings: &Settings) -> Result<(), PersistenceError> {
         self.write_json("settings.json", settings)
     }
+
+    fn load_playback(&self) -> Result<Option<PlaybackSession>, PersistenceError> {
+        self.read_json("playback.json")
+    }
+
+    fn save_playback(&self, session: &PlaybackSession) -> Result<(), PersistenceError> {
+        self.write_json("playback.json", session)
+    }
+
+    fn clear_playback(&self) -> Result<(), PersistenceError> {
+        match fs::remove_file(self.path_for("playback.json")) {
+            Ok(()) => Ok(()),
+            // Clearing an absent session is already the desired end state.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -143,6 +166,33 @@ mod tests {
         };
         store.save_settings(&settings).unwrap();
         assert_eq!(store.load_settings().unwrap(), settings);
+
+        assert_eq!(store.load_playback().unwrap(), None);
+        let session = PlaybackSession {
+            queue: vec!["C:/a/one.mp3".into()],
+            current_index: 0,
+            position_secs: 42.5,
+            shuffle: true,
+            repeat: crate::domain::queue::RepeatMode::All,
+        };
+        store.save_playback(&session).unwrap();
+        assert_eq!(store.load_playback().unwrap(), Some(session));
+
+        store.clear_playback().unwrap();
+        assert_eq!(store.load_playback().unwrap(), None);
+        // Clearing twice stays a no-op (file already absent).
+        store.clear_playback().unwrap();
+    }
+
+    #[test]
+    fn corrupt_playback_file_reports_error_with_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = JsonPersistence::new(dir.path());
+        std::fs::write(dir.path().join("playback.json"), b"{ nope").unwrap();
+        match store.load_playback().unwrap_err() {
+            PersistenceError::Corrupt { path, .. } => assert!(path.ends_with("playback.json")),
+            other => panic!("expected Corrupt, got {other:?}"),
+        }
     }
 
     #[test]

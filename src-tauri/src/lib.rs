@@ -74,6 +74,16 @@ pub fn run() {
             tracing::info!("LuMusic backend started");
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Last-chance flush on quit: the periodic poller save may be up
+            // to SESSION_SAVE_INTERVAL stale at this point.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let service = window.state::<SharedService>();
+                if let Ok(mut guard) = service.lock() {
+                    guard.save_playback_session();
+                };
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

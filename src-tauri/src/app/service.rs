@@ -6,18 +6,25 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::dto::{PlaybackStatus, PlayerStateDto};
 use crate::domain::library::{LibraryIndex, TrackQuery};
 use crate::domain::playlist::{PlaylistCollection, PlaylistError, Playlist};
 use crate::domain::queue::{AdvanceOutcome, Queue, RepeatMode};
 use crate::domain::scan::ScanSummary;
+use crate::domain::session::PlaybackSession;
 use crate::domain::settings::Settings;
 use crate::domain::track::{Track, TrackId};
 use crate::infra::audio::engine::AudioEngine;
 use crate::infra::fs_scan::LibraryScanner;
 use crate::infra::metadata::MetadataReader;
 use crate::infra::persistence::{Persistence, PersistenceError};
+
+/// How often the live playback position is flushed to disk while playing.
+/// Transitions (track change, seek, pause, quit) always persist immediately;
+/// this interval only bounds the loss window after a crash/kill.
+const SESSION_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Service-level errors surfaced to commands.
 #[derive(Debug, thiserror::Error)]
@@ -61,10 +68,15 @@ pub struct PlayerService {
     status: PlaybackStatus,
     /// Monotonic counter feeding the shuffle seed so each toggle differs.
     shuffle_seed: u64,
+    /// Mutable twin of `SESSION_SAVE_INTERVAL` so tests can force periodic
+    /// saves without sleeping.
+    session_save_interval: Duration,
+    last_session_save: Instant,
 }
 
 impl PlayerService {
-    /// Builds the service and loads persisted library/playlists/settings.
+    /// Builds the service, loads persisted state and restores the last
+    /// playback session (paused at its last position).
     pub fn new(
         engine: Box<dyn AudioEngine>,
         scanner: Arc<dyn LibraryScanner>,
@@ -74,6 +86,15 @@ impl PlayerService {
         let library = persistence.load_library()?.unwrap_or_default();
         let playlists = persistence.load_playlists()?;
         let settings = persistence.load_settings()?;
+        // A broken playback.json costs at most the resume convenience - it
+        // must never keep the app from starting.
+        let session = match persistence.load_playback() {
+            Ok(session) => session.and_then(PlaybackSession::sanitized),
+            Err(err) => {
+                tracing::warn!("ignoring unreadable playback session: {err}");
+                None
+            }
+        };
         let mut service = Self {
             engine,
             scanner,
@@ -85,9 +106,75 @@ impl PlayerService {
             queue: Queue::new(Vec::new(), None),
             status: PlaybackStatus::Stopped,
             shuffle_seed: 0,
+            session_save_interval: SESSION_SAVE_INTERVAL,
+            last_session_save: Instant::now(),
         };
         service.engine.set_volume(service.settings.volume);
+        service.restore_session(session);
         Ok(service)
+    }
+
+    /// Rebuilds the saved session: queue + modes, current track loaded into
+    /// the engine **paused** at its last position (launching must not blast
+    /// audio; the user presses play to continue). Any inconsistency (track
+    /// gone from the library, file deleted, decode failure) drops the
+    /// session and leaves the player stopped.
+    fn restore_session(&mut self, session: Option<PlaybackSession>) {
+        let Some(session) = session else {
+            return;
+        };
+        // The sanitizer guarantees an in-range index for a non-empty queue.
+        let Some(id) = session.queue.get(session.current_index).cloned() else {
+            return;
+        };
+        let Some(track) = self.library.get(&id).cloned() else {
+            tracing::warn!("dropping persisted session: track '{id}' is not in the library");
+            if let Err(err) = self.persistence.clear_playback() {
+                tracing::warn!("failed to clear persisted playback: {err}");
+            }
+            return;
+        };
+        let position = session.restore_position(track.duration_secs);
+        self.queue = Queue::new(session.queue, Some(session.current_index));
+        self.queue.set_repeat(session.repeat);
+        if session.shuffle {
+            // Fresh seed: the remaining shuffle order may differ from the
+            // last session, but the current track stays first.
+            self.shuffle_seed += 1;
+            self.queue.set_shuffle(true, self.shuffle_seed);
+        }
+        match self.engine.load_paused(&track.file_path, position) {
+            Ok(()) => {
+                self.status = PlaybackStatus::Paused;
+                tracing::info!("restored session: '{}' at {position:.1}s", track.id);
+            }
+            Err(err) => {
+                tracing::warn!("session restore failed for '{}': {err}", track.id);
+                self.queue = Queue::new(Vec::new(), None);
+                self.status = PlaybackStatus::Stopped;
+            }
+        }
+    }
+
+    /// Writes the current session (queue, modes, live position) to disk.
+    /// Called on every meaningful transition, periodically while playing
+    /// (see `poll`), and when the window closes. Failures are logged, never
+    /// fatal - persistence here is a convenience, not a guarantee.
+    pub fn save_playback_session(&mut self) {
+        self.last_session_save = Instant::now();
+        let Some(current_index) = self.queue.current_item_index() else {
+            return;
+        };
+        let session = PlaybackSession {
+            queue: self.queue.items().to_vec(),
+            current_index,
+            position_secs: self.engine.position_secs(),
+            shuffle: self.queue.shuffle(),
+            repeat: self.queue.repeat(),
+        };
+        if let Err(err) = self.persistence.save_playback(&session) {
+            tracing::warn!("failed to persist playback session: {err}");
+        }
     }
 
     // ----- library -----
@@ -202,6 +289,8 @@ impl PlayerService {
         self.engine.set_volume(self.settings.volume);
         self.engine.load_and_play(&track.file_path)?;
         self.status = PlaybackStatus::Playing;
+        // New track: persist immediately so a crash still resumes here.
+        self.save_playback_session();
         Ok(())
     }
 
@@ -243,6 +332,8 @@ impl PlayerService {
         self.engine.pause();
         if self.status == PlaybackStatus::Playing {
             self.status = PlaybackStatus::Paused;
+            // Position is frozen now - the ideal moment to persist it.
+            self.save_playback_session();
         }
     }
 
@@ -256,6 +347,12 @@ impl PlayerService {
     pub fn stop(&mut self) {
         self.engine.stop();
         self.status = PlaybackStatus::Stopped;
+        // Playback ended for good (user stop or exhausted queue): dropping
+        // the session means the next launch starts fresh instead of
+        // resurrecting a finished one.
+        if let Err(err) = self.persistence.clear_playback() {
+            tracing::warn!("failed to clear persisted playback: {err}");
+        }
     }
 
     /// Manual skip (repeat One still advances).
@@ -284,6 +381,7 @@ impl PlayerService {
             .map(|d| secs.clamp(0.0, d))
             .unwrap_or(secs.max(0.0));
         self.engine.seek(clamped)?;
+        self.save_playback_session();
         Ok(())
     }
 
@@ -297,15 +395,23 @@ impl PlayerService {
     pub fn set_shuffle(&mut self, on: bool) {
         self.shuffle_seed += 1;
         self.queue.set_shuffle(on, self.shuffle_seed);
+        self.save_playback_session();
     }
 
     pub fn set_repeat(&mut self, mode: RepeatMode) {
         self.queue.set_repeat(mode);
+        self.save_playback_session();
     }
 
     /// Background tick: detects the end of the current track and follows the
     /// queue rules (repeat One replays, repeat All wraps, otherwise next).
     pub fn poll(&mut self) -> PollOutcome {
+        // Crash protection: flush the live position every few seconds.
+        if self.status == PlaybackStatus::Playing
+            && self.last_session_save.elapsed() >= self.session_save_interval
+        {
+            self.save_playback_session();
+        }
         if self.status != PlaybackStatus::Playing {
             return PollOutcome::Unchanged;
         }
@@ -477,6 +583,15 @@ mod tests {
             s.active = true;
             s.paused = false;
             s.position = 0.0;
+            s.path = Some(path.to_path_buf());
+            Ok(())
+        }
+        fn load_paused(&mut self, path: &Path, at_secs: f64) -> Result<(), crate::infra::audio::engine::AudioError> {
+            let mut s = self.state.lock().unwrap();
+            s.log.push(format!("openPaused:{}@{at_secs:.1}", path.display()));
+            s.active = true;
+            s.paused = true;
+            s.position = at_secs;
             s.path = Some(path.to_path_buf());
             Ok(())
         }
@@ -849,5 +964,132 @@ mod tests {
         assert!(service.state().shuffle);
         service.set_repeat(RepeatMode::All);
         assert_eq!(service.state().repeat, RepeatMode::All);
+    }
+
+    // ---------- playback session persistence ----------
+
+    fn reopen(dir: &std::path::Path) -> (PlayerService, Arc<Mutex<MockEngineState>>) {
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let service = PlayerService::new(
+            Box::new(MockEngine {
+                state: engine_state.clone(),
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(JsonPersistence::new(dir)),
+        )
+        .unwrap();
+        (service, engine_state)
+    }
+
+    fn saved_session(dir: &std::path::Path) -> Option<PlaybackSession> {
+        JsonPersistence::new(dir).load_playback().unwrap()
+    }
+
+    #[test]
+    fn playback_persists_queue_position_and_modes() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        service.set_repeat(RepeatMode::All);
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0))
+            .unwrap();
+        service.seek(4.0).unwrap();
+
+        let session = saved_session(dir.path()).unwrap();
+        assert_eq!(session.queue, vec!["C:/lib/a.mp3", "C:/lib/b.mp3"]);
+        assert_eq!(session.current_index, 0);
+        assert!((session.position_secs - 4.0).abs() < 1e-9);
+        assert_eq!(session.repeat, RepeatMode::All);
+        assert!(!session.shuffle);
+    }
+
+    #[test]
+    fn stop_clears_persisted_session() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        assert!(saved_session(dir.path()).is_some());
+        service.stop();
+        assert_eq!(saved_session(dir.path()), None);
+    }
+
+    #[test]
+    fn restart_restores_paused_session_at_last_position() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0))
+            .unwrap();
+        service.set_shuffle(true);
+        service.seek(4.0).unwrap();
+        service.pause();
+        drop(service);
+
+        let (mut restored, engine_state) = reopen(dir.path());
+        let state = restored.state();
+        assert_eq!(state.status, PlaybackStatus::Paused);
+        assert_eq!(state.current_track.unwrap().id, "C:/lib/a.mp3");
+        assert!((state.position_secs - 4.0).abs() < 1e-9);
+        assert_eq!(state.queue_len, 2);
+        assert!(state.shuffle);
+        assert_eq!(
+            log_of(&engine_state),
+            vec!["openPaused:C:/lib/a.mp3@4.0".to_string()]
+        );
+
+        // Restored paused: the poller must not treat it as playing/finished.
+        assert_eq!(restored.poll(), PollOutcome::Unchanged);
+        // Pressing play continues the restored track.
+        restored.toggle().unwrap();
+        assert_eq!(restored.state().status, PlaybackStatus::Playing);
+        assert_eq!(log_of(&engine_state).last().unwrap(), "resume");
+    }
+
+    #[test]
+    fn restart_without_session_stays_stopped() {
+        let (_service, _engine, dir) = service_with_tracks();
+        // No playback happened: nothing to restore.
+        let (restored, _engine) = reopen(dir.path());
+        assert_eq!(restored.state().status, PlaybackStatus::Stopped);
+        assert_eq!(restored.state().current_track, None);
+    }
+
+    #[test]
+    fn restore_drops_session_when_track_left_the_library() {
+        let (_service, _engine, dir) = service_with_tracks();
+        JsonPersistence::new(dir.path())
+            .save_playback(&PlaybackSession {
+                queue: vec!["C:/lib/ghost.mp3".into()],
+                current_index: 0,
+                position_secs: 3.0,
+                shuffle: false,
+                repeat: RepeatMode::Off,
+            })
+            .unwrap();
+        let (restored, _engine) = reopen(dir.path());
+        assert_eq!(restored.state().status, PlaybackStatus::Stopped);
+        assert_eq!(restored.state().current_track, None);
+        assert_eq!(saved_session(dir.path()), None);
+    }
+
+    #[test]
+    fn corrupt_session_file_never_blocks_startup() {
+        let (_service, _engine, dir) = service_with_tracks();
+        std::fs::write(dir.path().join("playback.json"), b"{ nope").unwrap();
+        let (restored, _engine) = reopen(dir.path());
+        assert_eq!(restored.state().status, PlaybackStatus::Stopped);
+    }
+
+    #[test]
+    fn poll_periodically_flushes_live_position() {
+        let (mut service, engine, dir) = service_with_tracks();
+        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        // Simulate the crash case: no seek/pause transition, only time.
+        service.session_save_interval = Duration::ZERO;
+        engine.lock().unwrap().position = 7.5;
+        assert_eq!(service.poll(), PollOutcome::Unchanged);
+        let session = saved_session(dir.path()).unwrap();
+        assert!((session.position_secs - 7.5).abs() < 1e-9);
     }
 }

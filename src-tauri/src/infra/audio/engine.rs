@@ -41,6 +41,9 @@ impl From<SourceError> for AudioError {
 pub trait AudioEngine: Send {
     /// Opens `path` and starts playing it immediately from the start.
     fn load_and_play(&mut self, path: &Path) -> Result<(), AudioError>;
+    /// Opens `path` positioned at `at_secs` **without starting playback**
+    /// (session restore). Pressing play afterwards continues from `at_secs`.
+    fn load_paused(&mut self, path: &Path, at_secs: f64) -> Result<(), AudioError>;
     fn pause(&mut self);
     fn resume(&mut self);
     /// Stops playback and releases the current track.
@@ -66,6 +69,9 @@ enum Command {
     Open {
         path: PathBuf,
         at_secs: Option<f64>,
+        /// Pause inside the audio thread so a restored session can never
+        /// leak a brief burst of sound between "open" and "pause".
+        start_paused: bool,
         reply: Reply<Result<Arc<PosTracker>, AudioError>>,
     },
     Pause,
@@ -192,6 +198,19 @@ impl RodioEngine {
     fn query(&self) -> EngineSnapshot {
         self.call(|reply| Command::Query { reply }).unwrap_or_default()
     }
+
+    /// Shared implementation of `load_and_play` / `load_paused`.
+    fn open(&self, path: &Path, at_secs: Option<f64>, start_paused: bool) -> Result<(), AudioError> {
+        match self.call(|reply| Command::Open {
+            path: path.to_path_buf(),
+            at_secs,
+            start_paused,
+            reply,
+        }) {
+            Some(result) => result.map(|_| ()),
+            None => Err(AudioError::NoDevice), // audio thread is gone
+        }
+    }
 }
 
 /// Command loop running on the audio thread.
@@ -206,8 +225,16 @@ fn audio_loop(
     };
     while let Ok(command) = rx.recv() {
         match command {
-            Command::Open { path, at_secs, reply } => {
-                let result = state.open_at(&path, at_secs);
+            Command::Open { path, at_secs, start_paused, reply } => {
+                let result = state.open_at(&path, at_secs).map(|tracker| {
+                    if start_paused {
+                        if let Some(sink) = &state.sink {
+                            sink.pause();
+                        }
+                        state.paused = true;
+                    }
+                    tracker
+                });
                 let _ = reply.send(result);
             }
             Command::Pause => {
@@ -252,14 +279,11 @@ fn audio_loop(
 
 impl AudioEngine for RodioEngine {
     fn load_and_play(&mut self, path: &Path) -> Result<(), AudioError> {
-        match self.call(|reply| Command::Open {
-            path: path.to_path_buf(),
-            at_secs: None,
-            reply,
-        }) {
-            Some(result) => result.map(|_| ()),
-            None => Err(AudioError::NoDevice), // audio thread is gone
-        }
+        self.open(path, None, false)
+    }
+
+    fn load_paused(&mut self, path: &Path, at_secs: f64) -> Result<(), AudioError> {
+        self.open(path, Some(at_secs.max(0.0)), true)
     }
 
     fn pause(&mut self) {
@@ -340,6 +364,13 @@ impl AudioEngine for NullEngine {
         Ok(())
     }
 
+    fn load_paused(&mut self, path: &Path, _at_secs: f64) -> Result<(), AudioError> {
+        self.path = Some(path.to_path_buf());
+        self.loaded = true;
+        self.paused = true;
+        Ok(())
+    }
+
     fn pause(&mut self) {
         self.paused = true;
     }
@@ -407,5 +438,16 @@ mod tests {
         assert_eq!(engine.volume(), 0.5);
         engine.stop();
         assert!(!engine.is_active());
+    }
+
+    #[test]
+    fn null_engine_load_paused_stays_paused() {
+        let mut engine = NullEngine::default();
+        engine.load_paused(Path::new("C:/any.flac"), 30.0).unwrap();
+        // Loaded but paused: the poller must not treat it as playing.
+        assert!(engine.is_active());
+        assert!(engine.is_paused());
+        engine.resume();
+        assert!(!engine.is_paused());
     }
 }
