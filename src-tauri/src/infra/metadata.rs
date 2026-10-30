@@ -20,8 +20,9 @@ pub enum MetadataError {
 
 /// Abstraction over tag reading so services can be unit-tested.
 pub trait MetadataReader: Send + Sync {
-    /// Reads tags + audio properties. Falls back to the file stem for the
-    /// title when no usable tag exists, so this only fails on IO errors.
+    /// Reads tags + audio properties. The display title is always derived
+    /// from the file name; tags only fill artist/album/genre/etc. Fails only
+    /// on IO errors.
     fn read_track(&self, path: &Path) -> Result<Track, MetadataError>;
 }
 
@@ -40,10 +41,11 @@ impl MetadataReader for LoftyMetadataReader {
 
 /// Pure mapping from a lofty tag into our `Track` model.
 ///
-/// Missing fields degrade to `None`; the title falls back to the file stem
-/// when the tag has no title or an empty one. Text fields run through
-/// `fix_mojibake` because legacy taggers stored GBK/Big5 bytes declared as
-/// Latin-1, which tag readers surface as mojibake.
+/// The title is *always* the file stem: file names are the most direct,
+/// user-controlled label, while embedded tag titles are frequently missing,
+/// inconsistent, or mojibake. Tag fields other than the title (artist, album,
+/// ...) still come from the tags and run through `fix_mojibake`, because
+/// legacy taggers stored GBK/Big5 bytes declared as Latin-1.
 pub fn map_tag(path: &Path, size_bytes: u64, tag: Option<&Tag>, duration_secs: f64) -> Track {
     let mut track = Track::from_stem(path, size_bytes);
     track.duration_secs = if duration_secs.is_finite() && duration_secs > 0.0 {
@@ -56,12 +58,7 @@ pub fn map_tag(path: &Path, size_bytes: u64, tag: Option<&Tag>, duration_secs: f
     };
 
     // Repair first, trim second: mojibake bytes never carry meaningful spaces.
-    if let Some(title) = tag.title() {
-        let title = fix_mojibake(title.trim());
-        if !title.is_empty() {
-            track.title = title;
-        }
-    }
+    // The tag title is deliberately ignored (see the doc comment above).
     let clean = |value: Option<std::borrow::Cow<'_, str>>| {
         value
             .map(|v| fix_mojibake(v.trim()))
@@ -102,14 +99,15 @@ mod tests {
     }
 
     #[test]
-    fn map_tag_uses_tag_fields_when_present() {
+    fn map_tag_uses_tag_fields_except_title() {
         let track = map_tag(
             Path::new("C:/m/song.mp3"),
             123,
             tagged(Some("Real Title")).as_ref(),
             187.5,
         );
-        assert_eq!(track.title, "Real Title");
+        // The title always comes from the file stem.
+        assert_eq!(track.title, "song");
         assert_eq!(track.artist.as_deref(), Some("Artist"));
         assert_eq!(track.album.as_deref(), Some("Album"));
         assert_eq!(track.album_artist.as_deref(), Some("AA"));
@@ -128,14 +126,16 @@ mod tests {
     }
 
     #[test]
-    fn map_tag_ignores_empty_title_in_tag() {
+    fn map_tag_title_always_uses_file_stem() {
+        // Even a well-formed tag title loses to the file name on purpose:
+        // file names are the label the user actually controls.
         let track = map_tag(
-            Path::new("C:/m/stem.mp3"),
+            Path::new("C:/m/07 - Track Seven.mp3"),
             1,
-            tagged(Some("   ")).as_ref(),
+            tagged(Some("Real Title")).as_ref(),
             10.0,
         );
-        assert_eq!(track.title, "stem");
+        assert_eq!(track.title, "07 - Track Seven");
     }
 
     #[test]
@@ -152,7 +152,8 @@ mod tests {
         tag.set_album(gbk("叶惠美"));
 
         let track = map_tag(Path::new("C:/m/song.mp3"), 1, Some(&tag), 10.0);
-        assert_eq!(track.title, "晴天");
+        // Title from the file stem; artist/album repaired from tags.
+        assert_eq!(track.title, "song");
         assert_eq!(track.artist.as_deref(), Some("周杰伦"));
         assert_eq!(track.album.as_deref(), Some("叶惠美"));
     }
@@ -162,8 +163,8 @@ mod tests {
         let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
         tag.set_title("Café Del Mar".to_string());
         tag.set_artist("Björk".to_string());
-        let track = map_tag(Path::new("C:/m/song.mp3"), 1, Some(&tag), 10.0);
-        assert_eq!(track.title, "Café Del Mar");
+        let track = map_tag(Path::new("C:/m/Café Del Mar.mp3"), 1, Some(&tag), 10.0);
+        assert_eq!(track.title, "Café Del Mar"); // stem happens to match
         assert_eq!(track.artist.as_deref(), Some("Björk"));
     }
 

@@ -48,8 +48,9 @@ impl Default for Track {
 }
 
 impl Track {
-    /// Builds the minimal track for a file that has no usable tags:
-    /// the title falls back to the file stem.
+    /// Builds the base track for a file. The title - our display label -
+    /// is always derived from the file stem (file names are the most direct,
+    /// user-controlled label).
     pub fn from_stem(path: &Path, size_bytes: u64) -> Self {
         let title = path
             .file_stem()
