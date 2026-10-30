@@ -1,0 +1,92 @@
+# LuMusic
+
+A local music player built with **Rust (Tauri 2) + React 19 + Vite**, with a
+strictly layered architecture and tests accompanying every behavior.
+
+## Features
+
+- Scan a music folder and build a searchable, sortable library (MP3 / FLAC / WAV / OGG)
+- Play / pause / seek / volume, shuffle, repeat (off / all / one) with auto-advance
+- Playlists: create, rename, delete, add/remove/reorder tracks
+- State persisted across restarts (library cache, playlists, volume, last folder)
+- Progress/state pushed to the UI via Tauri events (~4 Hz progress, event-driven state)
+
+## Architecture
+
+Dependencies point strictly downwards; each layer is testable in isolation.
+
+```text
+┌─ Frontend (src/) ──────────────────────────────────────────────┐
+│ features/   UI modules (library, player, playlists, settings)  │
+│ stores/     zustand stores - all backend calls go through api/ │
+│ api/        PlayerApi interface + tauri impl + mock impl       │
+│ types/      DTOs mirroring Rust serde types                    │
+├─ Backend (src-tauri/src/) ─────────────────────────────────────┤
+│ app/    thin Tauri commands + PlayerService orchestration      │
+│         + poller thread (auto-advance, progress events)        │
+│ infra/  IO adapters behind traits: fs_scan (walkdir),          │
+│         metadata (lofty), audio (symphonia decode + rodio      │
+│         output on a dedicated thread), persistence (JSON)      │
+│ domain/ pure logic: Track, LibraryIndex, Queue (shuffle/       │
+│         repeat rules), Playlists, scan rules - zero IO         │
+└────────────────────────────────────────────────────────────────┘
+```
+
+Notable design decisions:
+
+- **`rodio` output is not `Send`**, so the engine owns a dedicated audio
+  thread and exposes a channel-based proxy (`infra/audio/engine.rs`).
+- **Accurate seeking** is implemented by a custom `rodio::Source` adapter
+  around symphonia's `FormatReader::seek` (`infra/audio/symphonia_source.rs`),
+  with a shared position tracker for progress reporting.
+- **Scanning does not block playback**: the heavy phase (walk + tag read)
+  runs on a blocking thread without the service lock; only the merge step
+  locks briefly (`app/commands.rs::scan_library`).
+- **Frontend mock API** (`src/api/mock.ts`) mirrors backend semantics, so the
+  UI can be developed in a plain browser (`npm run dev:mock`) and component
+  tests never touch Tauri IPC.
+
+## Getting started
+
+```bash
+npm install          # frontend deps
+npm run tauri dev    # run the desktop app (debug)
+npm run tauri build  # bundle installers
+```
+
+Browser-only development without Rust (in-memory mock data):
+
+```bash
+npm run dev:mock
+```
+
+## Testing
+
+```bash
+npm run check       # typecheck + vitest + cargo test (the full gate)
+npm run test        # frontend unit/component tests (vitest)
+npm run test:rust   # backend unit tests (cargo test)
+```
+
+Current coverage: **62 backend** + **55 frontend** tests. The working rule for
+this repo: any behavior change ships with a test that pins it.
+
+| Layer                 | Test style                                                   |
+| --------------------- | ------------------------------------------------------------ |
+| `domain`              | pure unit tests (seeded shuffle, repeat edge cases, pruning) |
+| `infra`               | real fixtures via `tempfile`/`hound` (WAV decode, seek)      |
+| `app` (PlayerService) | mock scanner/metadata/persistence/**audio engine**           |
+| stores / hooks        | vitest with the api module mocked at the seam                |
+| components            | testing-library user behavior (double-click play, sliders)   |
+
+## Project layout
+
+```text
+src/                  React frontend (see Architecture)
+src-tauri/            Rust backend (see Architecture)
+scripts/gen-icons.mjs deterministic app icon generation (no binary assets)
+```
+
+## Non-goals (for now)
+
+Lyrics, equalizer, gapless playback, tag editing, album-art extraction.
