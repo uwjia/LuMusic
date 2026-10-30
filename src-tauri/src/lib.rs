@@ -9,6 +9,7 @@
 //! ```
 
 pub mod app;
+pub mod domain;
 pub mod events;
 
 /// Boots the Tauri application: plugins, state, command handlers.
