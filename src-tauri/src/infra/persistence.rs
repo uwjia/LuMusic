@@ -163,6 +163,7 @@ mod tests {
         let settings = Settings {
             volume: 0.25,
             last_folder: Some("C:/music".into()),
+            close_to_tray: false,
         };
         store.save_settings(&settings).unwrap();
         assert_eq!(store.load_settings().unwrap(), settings);

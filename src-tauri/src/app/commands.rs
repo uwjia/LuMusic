@@ -2,13 +2,15 @@
 //! emit state events. No business logic lives here.
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::dto::{PlayerStateDto, ScanProgressDto};
 use super::service::{PlayerError, PlayerService};
 use super::state::SharedService;
+use super::tray::{TrayController, TrayLabels};
 use crate::domain::library::TrackQuery;
 use crate::domain::playlist::Playlist;
 use crate::domain::queue::RepeatMode;
@@ -26,9 +28,16 @@ pub fn app_info() -> Value {
     })
 }
 
-/// Emits the current player state to all windows.
+/// Emits the current player state to all windows and refreshes the tray
+/// menu/tooltip in the same step, so every surface stays consistent.
 pub fn emit_state(app: &AppHandle, service: &PlayerService) {
-    if let Err(err) = app.emit(ev::EVENT_PLAYER_STATE, service.state()) {
+    let state = service.state();
+    if let Some(tray) = app.try_state::<Mutex<TrayController>>() {
+        if let Ok(mut controller) = tray.lock() {
+            controller.update_player_state(&state);
+        }
+    }
+    if let Err(err) = app.emit(ev::EVENT_PLAYER_STATE, &state) {
         tracing::warn!("failed to emit player state: {err}");
     }
 }
@@ -307,4 +316,32 @@ pub fn playlist_get_tracks(
 pub fn settings_get(state: State<'_, SharedService>) -> Result<Settings, String> {
     let service = state.lock().map_err(|_| "service poisoned")?;
     Ok(service.settings())
+}
+
+/// Partial settings update (the `player_set_mode` pattern: only provided
+/// fields change). Currently `close_to_tray` is the only mutable field.
+#[tauri::command]
+pub fn settings_set(
+    state: State<'_, SharedService>,
+    close_to_tray: Option<bool>,
+) -> Result<Settings, String> {
+    let mut service = state.lock().map_err(|_| "service poisoned")?;
+    if let Some(on) = close_to_tray {
+        service.set_close_to_tray(on);
+    }
+    Ok(service.settings())
+}
+
+// ----- tray -----
+
+/// Pushes localized menu strings from the frontend i18n catalogue into the
+/// native tray menu (display-layer translation; see `app::tray`).
+#[tauri::command]
+pub fn tray_set_labels(
+    state: State<'_, Mutex<TrayController>>,
+    labels: TrayLabels,
+) -> Result<(), String> {
+    let mut tray = state.lock().map_err(|_| "tray poisoned")?;
+    tray.set_labels(labels);
+    Ok(())
 }

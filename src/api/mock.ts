@@ -12,8 +12,10 @@ import type {
   RepeatMode,
   ScanProgress,
   ScanSummary,
+  Settings,
   Track,
   TrackQuery,
+  TrayLabels,
 } from '@/types/track';
 
 const TRACKS_ROOT = 'C:/mock-music';
@@ -82,6 +84,8 @@ class MockApi implements PlayerApi {
   private libraryEvents = emitter<ScanSummary>();
 
   private timer: ReturnType<typeof setInterval> | null = null;
+  private closeToTray = true;
+  private trayLabels: TrayLabels | null = null;
 
   // ----- helpers -----
 
@@ -383,8 +387,24 @@ class MockApi implements PlayerApi {
       .filter((t): t is Track => Boolean(t));
   }
 
-  async settingsGet() {
-    return { volume: this.volume, lastFolder: TRACKS_ROOT };
+  async settingsGet(): Promise<Settings> {
+    return { volume: this.volume, lastFolder: TRACKS_ROOT, closeToTray: this.closeToTray };
+  }
+
+  async settingsSet(closeToTray?: boolean): Promise<Settings> {
+    // Mirrors the backend: only provided fields change, the rest persists.
+    if (closeToTray != null) this.closeToTray = closeToTray;
+    return this.settingsGet();
+  }
+
+  async traySetLabels(labels: TrayLabels): Promise<void> {
+    // The mock has no OS tray; recording keeps the seam observable in tests.
+    this.trayLabels = labels;
+  }
+
+  /** Last labels pushed by the UI (test/dev seam, not part of PlayerApi). */
+  get lastTrayLabels(): TrayLabels | null {
+    return this.trayLabels;
   }
 
   onPlayerState(cb: (state: PlayerState) => void) {

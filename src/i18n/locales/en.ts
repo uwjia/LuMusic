@@ -19,6 +19,10 @@ export const en = {
   'titlebar.restore': 'Restore',
   'titlebar.close': 'Close',
 
+  // system tray menu (labels are pushed to the backend's native menu)
+  'tray.show': 'Show LuMusic',
+  'tray.quit': 'Quit',
+
   // library page
   'library.searchPlaceholder': 'Search title, artist, album…',
   'library.searchLabel': 'Search tracks',
@@ -91,6 +95,10 @@ export const en = {
   'settings.aboutText':
     'Supported formats: MP3, FLAC, WAV, OGG. Settings and the library cache live in the app data directory.',
   'settings.language': 'Language',
+  'settings.tray': 'Tray',
+  'settings.closeToTray': 'Close to tray',
+  'settings.closeToTrayHint':
+    'Keep playing in the background when the window is closed. Restore it with the tray icon, or exit via Quit.',
 } as const;
 
 export type MessageKey = keyof typeof en;

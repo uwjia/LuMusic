@@ -11,6 +11,7 @@ import type {
   Track,
   TrackId,
   TrackQuery,
+  TrayLabels,
 } from '@/types/track';
 
 export type Unsubscribe = () => void;
@@ -47,6 +48,10 @@ export interface PlayerApi {
 
   // settings
   settingsGet(): Promise<Settings>;
+  settingsSet(closeToTray?: boolean): Promise<Settings>;
+
+  // tray (native menu owned by the backend; labels are display-layer i18n)
+  traySetLabels(labels: TrayLabels): Promise<void>;
 
   // events
   onPlayerState(cb: (state: PlayerState) => void): Unsubscribe;

@@ -16,13 +16,21 @@ export function SettingsPage() {
 
   const [folder, setFolder] = useState<string>('');
   const [version, setVersion] = useState('');
+  const [closeToTray, setCloseToTray] = useState(true);
 
   useEffect(() => {
     void api.settingsGet().then((settings) => {
       setFolder(settings.lastFolder ?? '');
+      setCloseToTray(settings.closeToTray);
     });
     void api.appInfo().then((info) => setVersion(`${info.name} v${info.version}`));
   }, []);
+
+  // Optimistic toggle: the backend persists the setting for the next launch.
+  const toggleCloseToTray = (next: boolean) => {
+    setCloseToTray(next);
+    void api.settingsSet(next);
+  };
 
   const pickFolder = async () => {
     // The native dialog only exists inside Tauri; mock mode edits the path.
@@ -113,6 +121,19 @@ export function SettingsPage() {
           ) : null}
         </div>
       ) : null}
+
+      <h2>{t('settings.tray')}</h2>
+      <div className="settings-row settings-toggle">
+        <input
+          id="close-to-tray"
+          type="checkbox"
+          data-testid="close-to-tray"
+          checked={closeToTray}
+          onChange={(e) => toggleCloseToTray(e.target.checked)}
+        />
+        <label htmlFor="close-to-tray">{t('settings.closeToTray')}</label>
+      </div>
+      <p className="muted settings-hint">{t('settings.closeToTrayHint')}</p>
 
       <h2>{t('settings.about')}</h2>
       <p className="muted">{version || '…'}</p>

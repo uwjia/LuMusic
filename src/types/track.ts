@@ -69,6 +69,20 @@ export interface ScanProgress {
 export interface Settings {
   volume: number;
   lastFolder: string | null;
+  /** Keep running in the tray (music keeps playing) when the window closes. */
+  closeToTray: boolean;
+}
+
+/** Localized labels for the native tray menu, pushed from the i18n layer
+ * (mirrors `TrayLabels` in src-tauri/src/app/tray.rs). */
+export interface TrayLabels {
+  play: string;
+  pause: string;
+  previous: string;
+  next: string;
+  show: string;
+  quit: string;
+  nothingPlaying: string;
 }
 
 export interface ProgressPayload {

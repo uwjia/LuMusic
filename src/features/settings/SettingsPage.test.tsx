@@ -10,6 +10,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 vi.mock('@/api', () => ({
   api: {
     settingsGet: vi.fn(),
+    settingsSet: vi.fn(),
     appInfo: vi.fn(),
     scanLibrary: vi.fn(),
   },
@@ -21,7 +22,16 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.settingsGet).mockResolvedValue({ volume: 0.8, lastFolder: 'C:/Music' });
+  vi.mocked(api.settingsGet).mockResolvedValue({
+    volume: 0.8,
+    lastFolder: 'C:/Music',
+    closeToTray: true,
+  });
+  vi.mocked(api.settingsSet).mockResolvedValue({
+    volume: 0.8,
+    lastFolder: 'C:/Music',
+    closeToTray: true,
+  });
   vi.mocked(api.appInfo).mockResolvedValue({ name: 'LuMusic', version: '0.1.0' });
   useLibraryStore.setState({
     tracks: [],
@@ -95,5 +105,30 @@ describe('SettingsPage scan section', () => {
     const button = screen.getByTestId('scan-button') as HTMLButtonElement;
     expect(button).toBeDisabled();
     expect(button).toHaveTextContent('Scanning…');
+  });
+});
+
+describe('SettingsPage tray section', () => {
+  it('reflects the persisted close-to-tray setting and persists toggles', async () => {
+    render(<SettingsPage />);
+    const box = (await screen.findByLabelText('Close to tray')) as HTMLInputElement;
+    expect(box).toBeChecked();
+
+    fireEvent.click(box);
+    expect(box).not.toBeChecked();
+    expect(api.settingsSet).toHaveBeenCalledWith(false);
+
+    fireEvent.click(box);
+    expect(api.settingsSet).toHaveBeenLastCalledWith(true);
+  });
+
+  it('starts unchecked when the setting is off', async () => {
+    vi.mocked(api.settingsGet).mockResolvedValue({
+      volume: 0.8,
+      lastFolder: 'C:/Music',
+      closeToTray: false,
+    });
+    render(<SettingsPage />);
+    expect(await screen.findByLabelText('Close to tray')).not.toBeChecked();
   });
 });

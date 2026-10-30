@@ -517,6 +517,15 @@ impl PlayerService {
     pub fn settings(&self) -> Settings {
         self.settings.clone()
     }
+
+    /// Persists the close-to-tray behavior (flushed immediately: it changes
+    /// what a window close means, so it must survive a crash).
+    pub fn set_close_to_tray(&mut self, on: bool) {
+        self.settings.close_to_tray = on;
+        if let Err(err) = self.persistence.save_settings(&self.settings) {
+            tracing::warn!("failed to persist settings: {err}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1091,5 +1100,21 @@ mod tests {
         assert_eq!(service.poll(), PollOutcome::Unchanged);
         let session = saved_session(dir.path()).unwrap();
         assert!((session.position_secs - 7.5).abs() < 1e-9);
+    }
+
+    // ---------- close-to-tray setting ----------
+
+    #[test]
+    fn set_close_to_tray_persists_across_restart() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        service.set_close_to_tray(false);
+        assert!(!service.settings().close_to_tray);
+        // Read back from disk like a fresh launch would.
+        assert!(
+            !JsonPersistence::new(dir.path())
+                .load_settings()
+                .unwrap()
+                .close_to_tray
+        );
     }
 }

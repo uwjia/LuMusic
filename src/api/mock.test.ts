@@ -88,3 +88,29 @@ describe('mock auto playlists', () => {
     expect(after.positionSecs).toBeLessThan(after.durationSecs ?? Infinity);
   });
 });
+
+describe('mock settings + tray seam', () => {
+  it('settingsGet exposes closeToTray and settingsSet only changes provided fields', async () => {
+    expect((await mockApi.settingsGet()).closeToTray).toBe(true);
+    const updated = await mockApi.settingsSet(false);
+    expect(updated.closeToTray).toBe(false);
+    expect((await mockApi.settingsGet()).closeToTray).toBe(false);
+    // Calling without arguments is a no-op (mirrors player_set_mode).
+    await mockApi.settingsSet(undefined);
+    expect((await mockApi.settingsGet()).closeToTray).toBe(false);
+  });
+
+  it('records the last pushed tray labels', async () => {
+    expect(mockApi.lastTrayLabels).toBeNull();
+    await mockApi.traySetLabels({
+      play: 'Play',
+      pause: 'Pause',
+      previous: 'Previous track',
+      next: 'Next track',
+      show: 'Show LuMusic',
+      quit: 'Quit',
+      nothingPlaying: 'Nothing playing',
+    });
+    expect(mockApi.lastTrayLabels?.quit).toBe('Quit');
+  });
+});

@@ -585,6 +585,29 @@ button {
   align-items: center;
 }
 
+.settings-toggle {
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  /* Native checkbox tinted with the app accent (no custom widget). */
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.settings-toggle label {
+  cursor: pointer;
+  color: var(--fg-0);
+}
+
+.settings-hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+
 .language-switch {
   margin-bottom: 8px;
 }

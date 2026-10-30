@@ -19,6 +19,10 @@ export const zhCN: Record<MessageKey, string> = {
   'titlebar.restore': '还原',
   'titlebar.close': '关闭',
 
+  // 系统托盘菜单（文案经 useTraySync 推送到后端的原生菜单）
+  'tray.show': '显示主窗口',
+  'tray.quit': '退出',
+
   // 音乐库页面
   'library.searchPlaceholder': '搜索标题、艺术家、专辑…',
   'library.searchLabel': '搜索曲目',
@@ -90,4 +94,7 @@ export const zhCN: Record<MessageKey, string> = {
   'settings.about': '关于',
   'settings.aboutText': '支持的格式：MP3、FLAC、WAV、OGG。设置与音乐库缓存保存在应用数据目录中。',
   'settings.language': '语言',
+  'settings.tray': '托盘',
+  'settings.closeToTray': '关闭窗口时最小化到托盘',
+  'settings.closeToTrayHint': '关闭窗口后应用将在后台继续播放；可通过托盘图标恢复窗口，或选择退出。',
 };

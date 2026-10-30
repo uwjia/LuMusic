@@ -9,6 +9,9 @@ pub struct Settings {
     pub volume: f32,
     /// Last scanned library folder, so the app can restore it on start.
     pub last_folder: Option<String>,
+    /// Keep running in the tray (music keeps playing) when the window is
+    /// closed instead of exiting the app.
+    pub close_to_tray: bool,
 }
 
 impl Default for Settings {
@@ -16,6 +19,10 @@ impl Default for Settings {
         Self {
             volume: 0.8,
             last_folder: None,
+            // A music player with a tray should keep playing in the
+            // background by default; users who dislike it can opt out in
+            // the settings page.
+            close_to_tray: true,
         }
     }
 }
@@ -49,5 +56,17 @@ mod tests {
         let s = Settings::default();
         assert!((0.0..=1.0).contains(&s.volume));
         assert_eq!(s.last_folder, None);
+        assert!(s.close_to_tray);
+    }
+
+    #[test]
+    fn legacy_settings_file_without_close_to_tray_backfills_default() {
+        // settings.json written by an older build lacks `closeToTray`;
+        // container-level `default` must keep it parseable and opt-in.
+        let parsed: Settings =
+            serde_json::from_str(r#"{ "volume": 0.5, "lastFolder": "C:/Music" }"#).unwrap();
+        assert_eq!(parsed.volume, 0.5);
+        assert_eq!(parsed.last_folder.as_deref(), Some("C:/Music"));
+        assert!(parsed.close_to_tray);
     }
 }

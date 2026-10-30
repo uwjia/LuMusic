@@ -65,6 +65,8 @@ export const tauriApi: PlayerApi = {
   playlistGetTracks: (id) => invoke('playlist_get_tracks', { id }),
 
   settingsGet: () => invoke('settings_get'),
+  settingsSet: (closeToTray) => invoke('settings_set', { closeToTray }),
+  traySetLabels: (labels) => invoke('tray_set_labels', { labels }),
 
   onPlayerState: (cb) => wire<PlayerState>(PLAYER_STATE_EVENT, cb),
   onProgress: (cb) => wire(PLAYER_PROGRESS_EVENT, cb),

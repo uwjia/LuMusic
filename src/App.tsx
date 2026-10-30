@@ -9,6 +9,7 @@ import { Sidebar } from '@/features/playlists/Sidebar';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { TitleBar } from '@/features/shell/TitleBar';
 import { usePlayerEvents } from '@/hooks/usePlayerEvents';
+import { useTraySync } from '@/hooks/useTraySync';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
@@ -20,6 +21,8 @@ export default function App() {
 
   // Push events (player state/progress, scan progress) -> stores.
   usePlayerEvents();
+  // Localize the native tray menu (and re-push on locale switch).
+  useTraySync();
 
   // Initial hydration: player snapshot + library + playlists.
   useEffect(() => {
