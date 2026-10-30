@@ -1,0 +1,39 @@
+/* Global reset + design tokens (dark theme). */
+:root {
+  --bg-0: #0f1117;
+  --bg-1: #171a23;
+  --bg-2: #1f2330;
+  --bg-3: #2a2f3f;
+  --fg-0: #f2f4f8;
+  --fg-1: #a8b0c2;
+  --fg-2: #6b7385;
+  --accent: #6366f1;
+  --accent-2: #a855f7;
+  --danger: #ef4444;
+  --radius: 8px;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-size: 14px;
+  overflow: hidden;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+}
