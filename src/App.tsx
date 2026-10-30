@@ -1,4 +1,5 @@
-// App shell: sidebar navigation, routed content, player bar, event bridge.
+// App shell: title bar, sidebar navigation, routed content, player bar,
+// event bridge.
 
 import { useEffect, useState } from 'react';
 import { LibraryPage } from './features/library/LibraryPage';
@@ -6,6 +7,7 @@ import { PlayerBar } from './features/player/PlayerBar';
 import { PlaylistPage } from './features/playlists/PlaylistPage';
 import { Sidebar } from './features/playlists/Sidebar';
 import { SettingsPage } from './features/settings/SettingsPage';
+import { TitleBar } from './features/shell/TitleBar';
 import { usePlayerEvents } from './hooks/usePlayerEvents';
 import { useLibraryStore } from './stores/libraryStore';
 import { usePlayerStore } from './stores/playerStore';
@@ -28,6 +30,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <TitleBar />
       <Sidebar view={view} onNavigate={setView} />
       <main className="content">
         {view.kind === 'library' ? <LibraryPage onOpenSettings={() => setView({ kind: 'settings' })} /> : null}

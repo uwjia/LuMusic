@@ -29,8 +29,6 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
 
   return (
     <nav className="sidebar" aria-label="Navigation">
-      <div className="brand">LuMusic</div>
-
       <button
         type="button"
         className={`nav-item ${view.kind === 'library' ? 'is-active' : ''}`}

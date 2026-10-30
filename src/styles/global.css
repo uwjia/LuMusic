@@ -141,9 +141,75 @@ button {
 .app-shell {
   display: grid;
   grid-template-columns: 220px 1fr;
-  grid-template-rows: 1fr auto;
-  grid-template-areas: 'sidebar content' 'player player';
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    'titlebar titlebar'
+    'sidebar content'
+    'player player';
   height: 100%;
+}
+
+/* ---------- title bar ---------- */
+
+.titlebar {
+  grid-area: titlebar;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding-left: 14px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--bg-2);
+}
+
+.titlebar-glyph {
+  color: var(--accent-2);
+  font-size: 14px;
+  pointer-events: none; /* keep drags on the drag region behind it */
+}
+
+.titlebar-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.titlebar-controls {
+  margin-left: auto;
+  display: flex;
+  align-self: stretch;
+}
+
+.titlebar-btn {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--fg-1);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.titlebar-btn:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.titlebar-btn:active {
+  opacity: 0.8;
+}
+
+.titlebar-close:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 .sidebar {
@@ -155,16 +221,6 @@ button {
   background: var(--bg-1);
   border-right: 1px solid var(--bg-2);
   overflow-y: auto;
-}
-
-.brand {
-  font-size: 18px;
-  font-weight: 700;
-  padding: 8px 10px 16px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 
 .nav-item {

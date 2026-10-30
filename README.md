@@ -5,6 +5,8 @@ strictly layered architecture and tests accompanying every behavior.
 
 ## Features
 
+- Custom frameless title bar that matches the app theme (drag region,
+  minimize / maximize / close; native controls are disabled in `tauri.conf.json`)
 - Scan a music folder and build a searchable, sortable library (MP3 / FLAC / WAV / OGG)
 - Automatic mojibake repair: legacy GBK/Big5/Shift-JIS tags misread as Latin-1
   (e.g. `ÄãºÃ` -> `你好`) are fixed with a high-confidence heuristic
@@ -85,7 +87,7 @@ npm run test        # frontend unit/component tests (vitest)
 npm run test:rust   # backend unit tests (cargo test)
 ```
 
-Current coverage: **62 backend** + **55 frontend** tests. The working rule for
+Current coverage: **84 backend** + **65 frontend** tests. The working rule for
 this repo: any behavior change ships with a test that pins it.
 
 | Layer                 | Test style                                                   |
