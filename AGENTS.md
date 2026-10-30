@@ -16,6 +16,7 @@
 | `npm run test:rust` | 后端 cargo test |
 | `npm run dev:mock` | 纯浏览器开发（内存 mock 数据，无需 Rust 工具链） |
 | `npm run tauri dev` / `build` | 桌面应用调试 / 打包 |
+| `npm run release` | 一键发版：release-it bump 版本（同步 tauri.conf/Cargo.toml/Cargo.lock）→ `chore(release)` 提交 → 推 `v*` tag，CI 随后打包并创建 GitHub Release |
 | `npm start [-- --mock\|--build\|--check]` | 一键启动器（亦可用 `start.cmd` / `start.sh`） |
 
 Windows 环境：shell 命令在 Git Bash 下执行，路径用正斜杠。
