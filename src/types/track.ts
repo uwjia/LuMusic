@@ -1,0 +1,81 @@
+// DTO types mirroring the Rust backend (serde camelCase).
+// Keep in sync with src-tauri/src/domain and src-tauri/src/app/dto.rs.
+
+export type TrackId = string;
+
+export interface Track {
+  id: TrackId;
+  title: string;
+  artist: string | null;
+  album: string | null;
+  albumArtist: string | null;
+  trackNo: number | null;
+  discNo: number | null;
+  year: number | null;
+  genre: string | null;
+  durationSecs: number | null;
+  filePath: string;
+  sizeBytes: number;
+}
+
+export type SortField = 'title' | 'artist' | 'album';
+
+export interface TrackQuery {
+  search: string | null;
+  sort: SortField;
+  descending: boolean;
+}
+
+export type RepeatMode = 'off' | 'all' | 'one';
+
+export type PlaybackStatus = 'stopped' | 'playing' | 'paused';
+
+export interface PlayerState {
+  status: PlaybackStatus;
+  currentTrack: Track | null;
+  queuePosition: number | null;
+  queueLen: number;
+  positionSecs: number;
+  durationSecs: number | null;
+  volume: number;
+  shuffle: boolean;
+  repeat: RepeatMode;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  items: TrackId[];
+  createdAt: number;
+}
+
+export interface ScanSummary {
+  root: string;
+  filesSeen: number;
+  added: number;
+  updated: number;
+  removed: number;
+  skipped: number;
+  warnings: string[];
+}
+
+export interface ScanProgress {
+  scanned: number;
+  total: number;
+}
+
+export interface Settings {
+  volume: number;
+  lastFolder: string | null;
+}
+
+export interface ProgressPayload {
+  positionSecs: number;
+  durationSecs: number | null;
+}
+
+// Event names (mirror src-tauri/src/events.rs).
+export const PLAYER_STATE_EVENT = 'player://state';
+export const PLAYER_PROGRESS_EVENT = 'player://progress';
+export const LIBRARY_UPDATED_EVENT = 'library://updated';
+export const LIBRARY_SCAN_PROGRESS_EVENT = 'library://scan-progress';

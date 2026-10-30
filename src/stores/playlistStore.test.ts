@@ -1,0 +1,116 @@
+// Behavior tests for the playlist store (api layer is mocked).
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { api } from '../api';
+import type { Playlist, Track } from '../types/track';
+import { usePlaylistStore } from './playlistStore';
+
+vi.mock('../api', () => ({
+  api: {
+    playlistList: vi.fn(),
+    playlistGetTracks: vi.fn(),
+    playlistCreate: vi.fn(),
+    playlistRename: vi.fn(),
+    playlistDelete: vi.fn(),
+    playlistAddTrack: vi.fn(),
+    playlistRemoveTrack: vi.fn(),
+    playlistMoveTrack: vi.fn(),
+  },
+}));
+
+const playlist = (id: string, name: string, items: string[] = []): Playlist => ({
+  id,
+  name,
+  items,
+  createdAt: 1,
+});
+
+const track = (id: string): Track => ({
+  id,
+  title: id,
+  artist: null,
+  album: null,
+  albumArtist: null,
+  trackNo: null,
+  discNo: null,
+  year: null,
+  genre: null,
+  durationSecs: 60,
+  filePath: `C:/m/${id}.mp3`,
+  sizeBytes: 1,
+});
+
+const chill = playlist('p1', 'Chill', ['a', 'b']);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(api.playlistList).mockResolvedValue([chill]);
+  vi.mocked(api.playlistGetTracks).mockResolvedValue([track('a'), track('b')]);
+  usePlaylistStore.setState({
+    playlists: [],
+    selectedTracks: [],
+    selectedId: null,
+    error: null,
+  });
+});
+
+describe('playlistStore', () => {
+  it('load populates playlists without touching the selection', async () => {
+    usePlaylistStore.setState({ selectedId: 'p1' });
+    await usePlaylistStore.getState().load();
+    expect(usePlaylistStore.getState().playlists).toEqual([chill]);
+    expect(usePlaylistStore.getState().selectedId).toBe('p1');
+  });
+
+  it('load clears a stale selection that no longer exists', async () => {
+    usePlaylistStore.setState({ selectedId: 'ghost' });
+    await usePlaylistStore.getState().load();
+    expect(usePlaylistStore.getState().selectedId).toBeNull();
+    expect(usePlaylistStore.getState().selectedTracks).toEqual([]);
+  });
+
+  it('select loads the tracks of the playlist', async () => {
+    await usePlaylistStore.getState().select('p1');
+    expect(api.playlistGetTracks).toHaveBeenCalledWith('p1');
+    expect(usePlaylistStore.getState().selectedTracks.map((t) => t.id)).toEqual(['a', 'b']);
+  });
+
+  it('select(null) empties the view without an api call', async () => {
+    usePlaylistStore.setState({ selectedTracks: [track('a')] });
+    await usePlaylistStore.getState().select(null);
+    expect(api.playlistGetTracks).not.toHaveBeenCalled();
+    expect(usePlaylistStore.getState().selectedTracks).toEqual([]);
+  });
+
+  it('create reports failures as error + false', async () => {
+    vi.mocked(api.playlistCreate).mockRejectedValue(
+      new Error("a playlist named 'Chill' already exists"),
+    );
+    const ok = await usePlaylistStore.getState().create('Chill');
+    expect(ok).toBe(false);
+    expect(usePlaylistStore.getState().error).toContain('already exists');
+  });
+
+  it('addTrack requires a selected playlist', async () => {
+    const ok = await usePlaylistStore.getState().addTrack('a');
+    expect(ok).toBe(false);
+    expect(usePlaylistStore.getState().error).toBe('no playlist selected');
+    expect(api.playlistAddTrack).not.toHaveBeenCalled();
+  });
+
+  it('addTrack refreshes selection and list', async () => {
+    vi.mocked(api.playlistAddTrack).mockResolvedValue(true);
+    await usePlaylistStore.getState().select('p1');
+    const ok = await usePlaylistStore.getState().addTrack('c');
+    expect(ok).toBe(true);
+    expect(api.playlistAddTrack).toHaveBeenCalledWith('p1', 'c');
+    expect(api.playlistGetTracks).toHaveBeenCalledTimes(2);
+  });
+
+  it('remove clears the selection when the removed playlist was active', async () => {
+    vi.mocked(api.playlistDelete).mockResolvedValue(undefined);
+    vi.mocked(api.playlistList).mockResolvedValue([]);
+    await usePlaylistStore.getState().select('p1');
+    await usePlaylistStore.getState().remove('p1');
+    expect(usePlaylistStore.getState().selectedId).toBeNull();
+  });
+});
