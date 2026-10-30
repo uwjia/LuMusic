@@ -8,8 +8,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::dto::{PlaybackStatus, PlayerStateDto};
+use super::dto::{LyricsDto, PlaybackStatus, PlayerStateDto};
 use crate::domain::library::{LibraryIndex, TrackQuery};
+use crate::domain::lyrics;
 use crate::domain::playlist::{PlaylistCollection, PlaylistError, Playlist};
 use crate::domain::queue::{AdvanceOutcome, Queue, RepeatMode};
 use crate::domain::scan::ScanSummary;
@@ -18,6 +19,7 @@ use crate::domain::settings::Settings;
 use crate::domain::track::{Track, TrackId};
 use crate::infra::audio::engine::AudioEngine;
 use crate::infra::fs_scan::LibraryScanner;
+use crate::infra::lyrics::LyricSource;
 use crate::infra::metadata::MetadataReader;
 use crate::infra::persistence::{Persistence, PersistenceError};
 
@@ -59,6 +61,7 @@ pub struct PlayerService {
     engine: Box<dyn AudioEngine>,
     scanner: Arc<dyn LibraryScanner>,
     metadata: Arc<dyn MetadataReader>,
+    lyric_source: Arc<dyn LyricSource>,
     persistence: Arc<dyn Persistence>,
 
     library: LibraryIndex,
@@ -81,6 +84,7 @@ impl PlayerService {
         engine: Box<dyn AudioEngine>,
         scanner: Arc<dyn LibraryScanner>,
         metadata: Arc<dyn MetadataReader>,
+        lyric_source: Arc<dyn LyricSource>,
         persistence: Arc<dyn Persistence>,
     ) -> Result<Self, PlayerError> {
         let library = persistence.load_library()?.unwrap_or_default();
@@ -99,6 +103,7 @@ impl PlayerService {
             engine,
             scanner,
             metadata,
+            lyric_source,
             persistence,
             library,
             playlists,
@@ -191,6 +196,22 @@ impl PlayerService {
 
     pub fn get_track(&self, id: &str) -> Option<Track> {
         self.library.get(id).cloned()
+    }
+
+    /// Lyrics for a track: associates a sibling `.lrc` file (infra) and
+    /// parses it (domain). `Ok(None)` = no lyric file; errors only for an
+    /// unknown track id.
+    pub fn lyrics_for_track(&self, id: &str) -> Result<Option<LyricsDto>, PlayerError> {
+        let track = self
+            .library
+            .get(id)
+            .ok_or_else(|| PlayerError::TrackNotFound(id.to_string()))?;
+        let found = match self.lyric_source.load(&track.file_path) {
+            Some(found) => found,
+            None => return Ok(None),
+        };
+        let parsed = lyrics::parse_lrc(&found.text);
+        Ok(Some(LyricsDto::from((Some(found.path.display().to_string()), parsed))))
     }
 
     pub fn library_len(&self) -> usize {
@@ -532,6 +553,7 @@ impl PlayerService {
 mod tests {
     use super::*;
     use crate::infra::fs_scan::ScannedFiles;
+    use crate::infra::lyrics::LoadedLyricFile;
     use crate::infra::metadata::MetadataError;
     use crate::infra::persistence::JsonPersistence;
     use std::path::PathBuf;
@@ -562,6 +584,23 @@ mod tests {
             let mut track = Track::from_stem(path, 1);
             track.duration_secs = Some(10.0);
             Ok(track)
+        }
+    }
+
+    /// Serves raw LRC text per audio path (association + parsing stay real).
+    #[derive(Default)]
+    struct MockLyricSource {
+        files: Mutex<std::collections::HashMap<String, String>>,
+    }
+
+    impl LyricSource for MockLyricSource {
+        fn load(&self, audio_path: &Path) -> Option<LoadedLyricFile> {
+            let key = audio_path.to_string_lossy();
+            let text = self.files.lock().unwrap().get(key.as_ref())?.clone();
+            Some(LoadedLyricFile {
+                path: audio_path.with_extension("lrc"),
+                text,
+            })
         }
     }
 
@@ -668,6 +707,7 @@ mod tests {
                 files: Mutex::new(files),
             }),
             Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
         )
         .unwrap();
@@ -721,6 +761,7 @@ mod tests {
                 files: Mutex::new(vec![]),
             }),
             Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
         )
         .unwrap();
@@ -812,6 +853,7 @@ mod tests {
                 files: Mutex::new(vec![PathBuf::from("C:/x/a.mp3"), PathBuf::from("C:/x/b.mp3")]),
             }),
             Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
         )
         .unwrap();
@@ -911,6 +953,7 @@ mod tests {
                 files: Mutex::new(vec![]),
             }),
             Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
         )
         .unwrap();
@@ -988,6 +1031,7 @@ mod tests {
                 files: Mutex::new(vec![]),
             }),
             Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir)),
         )
         .unwrap();
@@ -1100,6 +1144,81 @@ mod tests {
         assert_eq!(service.poll(), PollOutcome::Unchanged);
         let session = saved_session(dir.path()).unwrap();
         assert!((session.position_secs - 7.5).abs() < 1e-9);
+    }
+
+    // ---------- lyrics ----------
+
+    /// Two-track service whose `C:/lib/a.mp3` has the given LRC text.
+    fn service_with_lyrics(lrc_text: &str) -> PlayerService {
+        let dir = tempfile::TempDir::new().unwrap();
+        let lyric_source = Arc::new(MockLyricSource {
+            files: Mutex::new([("C:/lib/a.mp3".to_string(), lrc_text.to_string())].into()),
+        });
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let mut service = PlayerService::new(
+            Box::new(MockEngine {
+                state: engine_state,
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![
+                    PathBuf::from("C:/lib/a.mp3"),
+                    PathBuf::from("C:/lib/b.mp3"),
+                ]),
+            }),
+            Arc::new(MockMetadata),
+            lyric_source,
+            Arc::new(JsonPersistence::new(dir.path())),
+        )
+        .unwrap();
+        service.scan_library(Path::new("C:/lib")).unwrap();
+        service
+    }
+
+    #[test]
+    fn lyrics_associate_parse_and_sort_for_a_track() {
+        let service =
+            service_with_lyrics("[offset:500]\n[00:01.00]first\n[02:03.09][00:32.40]late at night\n");
+        let lyrics = service.lyrics_for_track("C:/lib/a.mp3").unwrap().unwrap();
+        assert_eq!(
+            lyrics.source_path.as_deref(),
+            Some(
+                Path::new("C:/lib/a.mp3")
+                    .with_extension("lrc")
+                    .to_str()
+                    .unwrap()
+            )
+        );
+        let lines: Vec<(u64, &str)> = lyrics
+            .lines
+            .iter()
+            .map(|l| (l.time_ms, l.text.as_str()))
+            .collect();
+        // Offset subtracted (500ms), repeats expanded, output time-sorted.
+        assert_eq!(
+            lines,
+            [
+                (500, "first"),
+                (31_900, "late at night"),
+                (122_590, "late at night")
+            ]
+        );
+    }
+
+    #[test]
+    fn lyrics_return_none_when_the_track_has_no_lrc() {
+        let (service, _engine, _dir) = service_with_tracks();
+        assert_eq!(service.lyrics_for_track("C:/lib/a.mp3").unwrap(), None);
+        assert_eq!(service.lyrics_for_track("C:/lib/b.mp3").unwrap(), None);
+    }
+
+    #[test]
+    fn lyrics_for_unknown_track_fail_with_track_not_found() {
+        let (service, _engine, _dir) = service_with_tracks();
+        assert!(matches!(
+            service.lyrics_for_track("C:/lib/ghost.mp3"),
+            Err(PlayerError::TrackNotFound(_))
+        ));
     }
 
     // ---------- close-to-tray setting ----------

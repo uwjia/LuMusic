@@ -62,6 +62,18 @@ export const zhCN: Record<MessageKey, string> = {
   'player.repeatOne': '单曲循环',
   'player.seek': '进度',
   'player.volume': '音量',
+  'player.showLyrics': '显示歌词',
+  'player.hideLyrics': '隐藏歌词',
+
+  // 歌词页面
+  'lyrics.title': '歌词',
+  'lyrics.close': '关闭歌词',
+  'lyrics.loading': '正在加载歌词…',
+  'lyrics.nothingPlaying': '暂无播放',
+  'lyrics.nothingPlayingHint': '播放一首歌即可查看歌词。',
+  'lyrics.noLyrics': '未找到歌词',
+  'lyrics.noLyricsHint': '把与歌曲同名的 .lrc 文件放到同一文件夹，然后重新打开歌词页。',
+  'lyrics.seekTo': '跳转到 {time}',
 
   // 歌单页面
   // 固定自动歌单在后端保留 canonical 名（domain/scan.rs 的 All Tracks / Default），
@@ -84,17 +96,29 @@ export const zhCN: Record<MessageKey, string> = {
   'playlist.copyNameN': '{name}（副本 {n}）',
 
   // 设置页面
+  'settings.title': '设置',
+  'settings.language': '语言',
+  'settings.languageHint': '选择界面语言，更改立即生效。',
   'settings.library': '音乐库',
+  'settings.libraryHint': '选择音乐所在的文件夹，然后扫描。',
   'settings.musicFolder': '音乐文件夹',
   'settings.browse': '浏览…',
   'settings.scanFolder': '扫描文件夹',
   'settings.scanning': '正在扫描…',
-  'settings.lastScan':
-    '上次扫描 {root}：共 {filesSeen} 个文件 · 新增 {added} · 更新 {updated} · 移除 {removed} · 跳过 {skipped}',
-  'settings.about': '关于',
-  'settings.aboutText': '支持的格式：MP3、FLAC、WAV、OGG。设置与音乐库缓存保存在应用数据目录中。',
-  'settings.language': '语言',
+  'settings.lastScanRoot': '上次扫描：{root}',
+  'settings.scanFiles': '{count} 个文件',
+  'settings.scanFilesOne': '{count} 个文件',
+  'settings.scanAdded': '新增 {count}',
+  'settings.scanAddedOne': '新增 {count}',
+  'settings.scanUpdated': '更新 {count}',
+  'settings.scanUpdatedOne': '更新 {count}',
+  'settings.scanRemoved': '移除 {count}',
+  'settings.scanRemovedOne': '移除 {count}',
+  'settings.scanSkipped': '跳过 {count}',
+  'settings.scanSkippedOne': '跳过 {count}',
   'settings.tray': '托盘',
   'settings.closeToTray': '关闭窗口时最小化到托盘',
   'settings.closeToTrayHint': '关闭窗口后应用将在后台继续播放；可通过托盘图标恢复窗口，或选择退出。',
+  'settings.about': '关于',
+  'settings.aboutText': '支持的格式：MP3、FLAC、WAV、OGG。设置与音乐库缓存保存在应用数据目录中。',
 };

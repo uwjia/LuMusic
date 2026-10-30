@@ -114,3 +114,15 @@ describe('mock settings + tray seam', () => {
     expect(mockApi.lastTrayLabels?.quit).toBe('Quit');
   });
 });
+
+describe('mock lyrics seam', () => {
+  it('serves parsed lyrics for the track with a sibling lrc, null otherwise', async () => {
+    const lyrics = await mockApi.lyricsGet('t1');
+    expect(lyrics?.sourcePath).toBe('C:/mock-music/Alpha Waves.lrc');
+    expect(lyrics?.lines[0]).toEqual({ timeMs: 0, text: 'Nova Fields - Alpha Waves' });
+    // Empty-text interludes survive, mirroring the backend parser.
+    expect(lyrics?.lines.some((l) => l.text === '')).toBe(true);
+    // Every other track has no .lrc sibling.
+    expect(await mockApi.lyricsGet('t2')).toBeNull();
+  });
+});

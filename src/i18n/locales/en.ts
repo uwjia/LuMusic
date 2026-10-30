@@ -62,6 +62,19 @@ export const en = {
   'player.repeatOne': 'Repeat one',
   'player.seek': 'Seek',
   'player.volume': 'Volume',
+  'player.showLyrics': 'Show lyrics',
+  'player.hideLyrics': 'Hide lyrics',
+
+  // lyrics page
+  'lyrics.title': 'Lyrics',
+  'lyrics.close': 'Close lyrics',
+  'lyrics.loading': 'Loading lyrics…',
+  'lyrics.nothingPlaying': 'Nothing playing',
+  'lyrics.nothingPlayingHint': 'Start a track to see its lyrics.',
+  'lyrics.noLyrics': 'No lyrics found',
+  'lyrics.noLyricsHint':
+    'Place a .lrc file with the same name as the song in the same folder, then reopen the lyrics page.',
+  'lyrics.seekTo': 'Jump to {time}',
 
   // playlist page
   // Fixed auto playlists keep their canonical backend names ("All Tracks" /
@@ -84,21 +97,33 @@ export const en = {
   'playlist.copyNameN': '{name} (copy) {n}',
 
   // settings page
+  'settings.title': 'Settings',
+  'settings.language': 'Language',
+  'settings.languageHint': 'Interface language — applies immediately.',
   'settings.library': 'Library',
+  'settings.libraryHint': 'Choose the folder your music lives in, then scan it.',
   'settings.musicFolder': 'Music folder',
   'settings.browse': 'Browse…',
   'settings.scanFolder': 'Scan folder',
   'settings.scanning': 'Scanning…',
-  'settings.lastScan':
-    'Last scan of {root}: {filesSeen} files · {added} added · {updated} updated · {removed} removed · {skipped} skipped',
-  'settings.about': 'About',
-  'settings.aboutText':
-    'Supported formats: MP3, FLAC, WAV, OGG. Settings and the library cache live in the app data directory.',
-  'settings.language': 'Language',
+  'settings.lastScanRoot': 'Last scanned: {root}',
+  'settings.scanFiles': '{count} files',
+  'settings.scanFilesOne': '{count} file',
+  'settings.scanAdded': '{count} added',
+  'settings.scanAddedOne': '{count} added',
+  'settings.scanUpdated': '{count} updated',
+  'settings.scanUpdatedOne': '{count} updated',
+  'settings.scanRemoved': '{count} removed',
+  'settings.scanRemovedOne': '{count} removed',
+  'settings.scanSkipped': '{count} skipped',
+  'settings.scanSkippedOne': '{count} skipped',
   'settings.tray': 'Tray',
   'settings.closeToTray': 'Close to tray',
   'settings.closeToTrayHint':
     'Keep playing in the background when the window is closed. Restore it with the tray icon, or exit via Quit.',
+  'settings.about': 'About',
+  'settings.aboutText':
+    'Supported formats: MP3, FLAC, WAV, OGG. Settings and the library cache live in the app data directory.',
 } as const;
 
 export type MessageKey = keyof typeof en;

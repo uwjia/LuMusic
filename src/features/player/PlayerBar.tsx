@@ -5,7 +5,9 @@ import { Slider } from '@/components/ui/Slider';
 import { IconButton } from '@/components/ui/IconButton';
 import { useTranslation } from '@/i18n';
 import { playModeOf, usePlayerStore, type PlayMode } from '@/stores/playerStore';
+import { useLyricsStore } from '@/stores/lyricsStore';
 import { MODE_ICON } from '@/features/player/ModeIcons';
+import { LyricsIcon } from '@/features/lyrics/LyricsIcons';
 const MODE_LABEL_KEY: Record<
   PlayMode,
   'player.modeSequential' | 'player.repeatAll' | 'player.repeatOne' | 'player.shuffle'
@@ -19,7 +21,9 @@ const MODE_LABEL_KEY: Record<
 export function PlayerBar() {
   const state = usePlayerStore((s) => s.state);
   const error = usePlayerStore((s) => s.error);
+  const lyricsOpen = useLyricsStore((s) => s.open);
   const { toggle, next, prev, seek, setVolume, cyclePlayMode } = usePlayerStore.getState();
+  const toggleLyrics = useLyricsStore.getState().toggle;
   const { t } = useTranslation();
 
   if (!state) {
@@ -47,6 +51,15 @@ export function PlayerBar() {
 
       <div className="transport">
         <div className="transport-buttons">
+          <IconButton
+            label={lyricsOpen ? t('player.hideLyrics') : t('player.showLyrics')}
+            active={lyricsOpen}
+            aria-pressed={lyricsOpen}
+            onClick={toggleLyrics}
+            data-testid="lyrics-toggle"
+          >
+            <LyricsIcon />
+          </IconButton>
           <IconButton
             label={t(MODE_LABEL_KEY[mode])}
             active={mode !== 'sequential'}

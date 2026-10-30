@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { api } from '@/api';
 import type { PlayerState, Track } from '@/types/track';
 import { usePlayerStore } from '@/stores/playerStore';
+import { useLyricsStore } from '@/stores/lyricsStore';
 import { PlayerBar } from '@/features/player/PlayerBar';
 
 vi.mock('@/api', () => ({
@@ -52,6 +53,7 @@ const state = (over: Partial<PlayerState> = {}): PlayerState => ({
 beforeEach(() => {
   vi.clearAllMocks();
   usePlayerStore.setState({ state: null, error: null });
+  useLyricsStore.setState({ open: false });
 });
 
 describe('PlayerBar', () => {
@@ -111,6 +113,27 @@ describe('PlayerBar', () => {
     expect(modeBtn.querySelector('svg')).toBeInTheDocument();
     fireEvent.click(modeBtn);
     await vi.waitFor(() => expect(api.playerSetMode).toHaveBeenCalledWith(false, 'off'));
+  });
+
+  it('lyrics toggle sits left of the play mode button and flips the page flag', () => {
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+    const lyricsBtn = screen.getByTestId('lyrics-toggle');
+    const modeBtn = screen.getByTestId('play-mode-btn');
+    // Entry requirement: the lyrics button is placed before the mode button.
+    expect(lyricsBtn.compareDocumentPosition(modeBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lyricsBtn).toHaveAttribute('aria-label', 'Show lyrics');
+    expect(lyricsBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(lyricsBtn.querySelector('svg')).toBeInTheDocument();
+
+    fireEvent.click(lyricsBtn);
+    expect(useLyricsStore.getState().open).toBe(true);
+    expect(screen.getByTestId('lyrics-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('lyrics-toggle')).toHaveAttribute('aria-label', 'Hide lyrics');
+    expect(screen.getByTestId('lyrics-toggle')).toHaveClass('is-active');
+
+    fireEvent.click(screen.getByTestId('lyrics-toggle'));
+    expect(useLyricsStore.getState().open).toBe(false);
   });
 
   it('volume slider commits on release', async () => {

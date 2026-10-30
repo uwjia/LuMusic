@@ -75,7 +75,7 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 
 - 环境 jsdom；`vitest.setup.ts` 已桩掉 `ResizeObserver` 并给 `.track-body` 假尺寸——虚拟化表格依赖它，勿删。
 - 跨 store 的组件测试（如 Sidebar）需同时 reset 相关 store 与 mock 的 `api`。
-- 现有规模：**121 前端 + 90 后端**；新增行为时保持各层均有覆盖，而非只补一层。
+- 现有规模：**154 前端 + 135 后端**；新增行为时保持各层均有覆盖，而非只补一层。
 
 ## 工程约束
 
@@ -104,4 +104,6 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 
 ### Non-goals（当前不做）
 
-歌词、均衡器、无缝播放、标签编辑、封面提取。遇到相关需求先确认范围。
+均衡器、无缝播放、标签编辑、封面提取。遇到相关需求先确认范围。
+
+（歌词已实现：`domain/lyrics.rs` 解析、`infra/lyrics.rs` 同名 `.lrc` 自动关联 + 编码修复、`features/lyrics` 渲染页，入口在播放模式按钮左侧。）

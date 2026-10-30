@@ -5,6 +5,7 @@
 
 pub mod encoding;
 pub mod library;
+pub mod lyrics;
 pub mod playlist;
 pub mod queue;
 pub mod scan;

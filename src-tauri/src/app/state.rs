@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use super::service::{PlayerError, PlayerService};
 use crate::infra::audio::engine::{AudioEngine, NullEngine, RodioEngine};
 use crate::infra::fs_scan::WalkdirScanner;
+use crate::infra::lyrics::FsLyricSource;
 use crate::infra::metadata::LoftyMetadataReader;
 use crate::infra::persistence::JsonPersistence;
 
@@ -26,6 +27,7 @@ pub fn build(data_dir: &Path) -> Result<SharedService, PlayerError> {
         engine,
         Arc::new(WalkdirScanner),
         Arc::new(LoftyMetadataReader),
+        Arc::new(FsLyricSource),
         Arc::new(JsonPersistence::new(data_dir)),
     )?;
     Ok(Arc::new(Mutex::new(service)))

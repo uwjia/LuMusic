@@ -5,6 +5,7 @@
 
 use serde::Serialize;
 
+use crate::domain::lyrics::Lyrics;
 use crate::domain::queue::RepeatMode;
 use crate::domain::track::Track;
 
@@ -47,4 +48,39 @@ pub struct ProgressDto {
 pub struct ScanProgressDto {
     pub scanned: usize,
     pub total: usize,
+}
+
+/// One synced lyric line (from `domain::lyrics`, ready for the UI).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricLineDto {
+    pub time_ms: u64,
+    /// Empty string marks an interlude (rendered as a spacer).
+    pub text: String,
+}
+
+/// Lyrics associated with a track (`lyrics_get` command).
+/// `None` (JSON null) means the track has no lyric file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsDto {
+    /// Path of the matched `.lrc` file, shown to prove the association.
+    pub source_path: Option<String>,
+    pub lines: Vec<LyricLineDto>,
+}
+
+impl From<(Option<String>, Lyrics)> for LyricsDto {
+    fn from((source_path, lyrics): (Option<String>, Lyrics)) -> Self {
+        Self {
+            source_path,
+            lines: lyrics
+                .lines
+                .into_iter()
+                .map(|line| LyricLineDto {
+                    time_ms: line.time_ms,
+                    text: line.text,
+                })
+                .collect(),
+        }
+    }
 }

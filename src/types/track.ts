@@ -90,6 +90,20 @@ export interface ProgressPayload {
   durationSecs: number | null;
 }
 
+/** One synced lyric line (parsed from a sibling `.lrc` file by the backend). */
+export interface LyricLine {
+  timeMs: number;
+  /** Empty string marks an interlude (rendered as a spacer). */
+  text: string;
+}
+
+/** Lyrics associated with a track via `lyricsGet`; null = no `.lrc` file. */
+export interface Lyrics {
+  /** Path of the matched `.lrc` file (proves the association to the user). */
+  sourcePath: string | null;
+  lines: LyricLine[];
+}
+
 // Event names (mirror src-tauri/src/events.rs).
 export const PLAYER_STATE_EVENT = 'player://state';
 export const PLAYER_PROGRESS_EVENT = 'player://progress';

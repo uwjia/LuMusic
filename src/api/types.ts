@@ -3,6 +3,7 @@
 // (tests + `npm run dev:mock` browser development).
 
 import type {
+  Lyrics,
   PlayerState,
   Playlist,
   ScanProgress,
@@ -35,6 +36,10 @@ export interface PlayerApi {
   playerSeek(secs: number): Promise<PlayerState>;
   playerSetVolume(volume: number): Promise<PlayerState>;
   playerSetMode(shuffle?: boolean, repeat?: PlayerState['repeat']): Promise<PlayerState>;
+
+  // lyrics
+  /** Parsed lyrics for a track; null when the track has no `.lrc` file. */
+  lyricsGet(trackId: TrackId): Promise<Lyrics | null>;
 
   // playlists
   playlistList(): Promise<Playlist[]>;

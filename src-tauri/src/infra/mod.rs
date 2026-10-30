@@ -3,5 +3,6 @@
 
 pub mod audio;
 pub mod fs_scan;
+pub mod lyrics;
 pub mod metadata;
 pub mod persistence;

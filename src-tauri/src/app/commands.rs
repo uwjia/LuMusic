@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use super::dto::{PlayerStateDto, ScanProgressDto};
+use super::dto::{LyricsDto, PlayerStateDto, ScanProgressDto};
 use super::service::{PlayerError, PlayerService};
 use super::state::SharedService;
 use super::tray::{TrayController, TrayLabels};
@@ -112,6 +112,17 @@ pub fn get_tracks(
 ) -> Result<Vec<Track>, String> {
     let service = state.lock().map_err(|_| "service poisoned")?;
     Ok(service.query_tracks(&query.unwrap_or_default()))
+}
+
+/// Lyrics associated with a track (sibling `.lrc` file, parsed).
+/// `null` = no lyric file exists for this track.
+#[tauri::command]
+pub fn lyrics_get(
+    state: State<'_, SharedService>,
+    track_id: TrackId,
+) -> Result<Option<LyricsDto>, String> {
+    let service = state.lock().map_err(|_| "service poisoned")?;
+    map(service.lyrics_for_track(&track_id))
 }
 
 // ----- playback -----

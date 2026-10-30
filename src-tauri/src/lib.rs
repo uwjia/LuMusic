@@ -40,6 +40,7 @@ pub fn run() {
             app::commands::app_info,
             app::commands::scan_library,
             app::commands::get_tracks,
+            app::commands::lyrics_get,
             app::commands::player_state,
             app::commands::player_load,
             app::commands::player_toggle,

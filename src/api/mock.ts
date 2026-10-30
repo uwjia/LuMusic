@@ -7,6 +7,7 @@
 
 import type { PlayerApi, Unsubscribe } from '@/api/types';
 import type {
+  Lyrics,
   PlayerState,
   Playlist,
   RepeatMode,
@@ -67,6 +68,21 @@ const SAMPLE_TRACKS: Track[] = [
   makeTrack('t5', 'Echo Lake', 'Nova Fields', 'Aurora', 198, 'Nova Fields'),
 ];
 
+// Parsed form of a fictional `Alpha Waves.lrc` next to the mock track —
+// mirrors what the backend returns for a real sibling .lrc file (lines
+// sorted, offset applied, empty-text interludes kept).
+const SAMPLE_LYRICS: Lyrics = {
+  sourcePath: `${TRACKS_ROOT}/Alpha Waves.lrc`,
+  lines: [
+    { timeMs: 0, text: 'Nova Fields - Alpha Waves' },
+    { timeMs: 4_000, text: 'Ride the alpha waves tonight' },
+    { timeMs: 8_000, text: 'Colors bloom behind your eyes' },
+    { timeMs: 12_500, text: '' },
+    { timeMs: 13_000, text: 'Slow down, let the evening in' },
+    { timeMs: 17_000, text: 'Ride the alpha waves again' },
+  ],
+};
+
 class MockApi implements PlayerApi {
   private tracks = [...SAMPLE_TRACKS];
   private playlists: Playlist[] = [];
@@ -86,6 +102,8 @@ class MockApi implements PlayerApi {
   private timer: ReturnType<typeof setInterval> | null = null;
   private closeToTray = true;
   private trayLabels: TrayLabels | null = null;
+  /** Only t1 "ships" with a sibling .lrc file. */
+  private lyrics = new Map<string, Lyrics>([['t1', SAMPLE_LYRICS]]);
 
   // ----- helpers -----
 
@@ -400,6 +418,11 @@ class MockApi implements PlayerApi {
   async traySetLabels(labels: TrayLabels): Promise<void> {
     // The mock has no OS tray; recording keeps the seam observable in tests.
     this.trayLabels = labels;
+  }
+
+  async lyricsGet(trackId: string): Promise<Lyrics | null> {
+    // Mirrors the backend: only tracks with a sibling .lrc have lyrics.
+    return this.lyrics.get(trackId) ?? null;
   }
 
   /** Last labels pushed by the UI (test/dev seam, not part of PlayerApi). */
