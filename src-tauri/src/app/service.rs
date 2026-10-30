@@ -136,7 +136,8 @@ impl PlayerService {
     }
 
     /// Pure merge step (kept separate for tests): upserts tracks, prunes ids
-    /// that disappeared, persists library + settings.
+    /// that disappeared, syncs the folder-based auto playlists, persists
+    /// library + playlists + settings.
     pub fn apply_scan(
         &mut self,
         root: &Path,
@@ -147,8 +148,10 @@ impl PlayerService {
         let mut added = 0;
         let mut updated = 0;
         let mut keep = std::collections::HashSet::new();
+        let mut paths = Vec::with_capacity(tracks.len());
         for track in tracks {
             keep.insert(track.id.clone());
+            paths.push(track.file_path.clone());
             if self.library.upsert(track) {
                 updated += 1;
             } else {
@@ -156,6 +159,15 @@ impl PlayerService {
             }
         }
         let removed = self.library.retain_only(&keep);
+
+        // Folder structure -> auto playlists (All Tracks / Default / per folder).
+        let specs = crate::domain::scan::auto_playlist_plan(root, &paths);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.playlists.sync_auto(&specs, now);
+
         let summary = ScanSummary {
             root: root.display().to_string(),
             files_seen,
@@ -168,6 +180,9 @@ impl PlayerService {
         self.settings.last_folder = Some(root.display().to_string());
         if let Err(err) = self.persistence.save_library(&self.library) {
             tracing::warn!("failed to persist library: {err}");
+        }
+        if let Err(err) = self.persist_playlists() {
+            tracing::warn!("failed to persist playlists: {err}");
         }
         if let Err(err) = self.persistence.save_settings(&self.settings) {
             tracing::warn!("failed to persist settings: {err}");
@@ -760,7 +775,7 @@ mod tests {
             Err(PlayerError::Playlist(PlaylistError::DuplicateName(_)))
         ));
 
-        // Survives restart (persisted).
+        // Survives restart (persisted) - next to the scan's auto playlists.
         drop(service);
         let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
         let reloaded = PlayerService::new(
@@ -775,8 +790,53 @@ mod tests {
             Arc::new(JsonPersistence::new(dir.path())),
         )
         .unwrap();
-        assert_eq!(reloaded.playlists().len(), 1);
-        assert_eq!(reloaded.playlists()[0].items, vec!["C:/lib/a.mp3".to_string()]);
+        // Manual playlist + auto playlists from the earlier scan.
+        let names: Vec<(String, bool)> = reloaded
+            .playlists()
+            .iter()
+            .map(|p| (p.name.clone(), p.auto_generated))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("All Tracks".to_string(), true),
+                ("Default".to_string(), true),
+                ("Chill".to_string(), false),
+            ]
+        );
+        let playlists = reloaded.playlists();
+        let chill = playlists.iter().find(|p| p.name == "Chill").unwrap();
+        assert_eq!(chill.items, vec!["C:/lib/a.mp3".to_string()]);
+    }
+
+    #[test]
+    fn scan_creates_and_resyncs_folder_playlists() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        // Initial scan: both mock files sit in the root -> Default + All.
+        let by_name: Vec<(String, usize)> = service
+            .playlists()
+            .iter()
+            .map(|p| (p.name.clone(), p.items.len()))
+            .collect();
+        assert_eq!(
+            by_name,
+            vec![("All Tracks".to_string(), 2), ("Default".to_string(), 2)]
+        );
+
+        // Rescan where only b.mp3 remains and lives in folder "Solo":
+        // Default disappears, "Solo" appears, All Tracks shrinks. The old
+        // root-level b.mp3 id is also replaced by the Solo path.
+        let summary = apply_scan_of(&mut service, &["C:/lib/Solo/b.mp3"]);
+        assert_eq!(summary.removed, 2);
+        let by_name: Vec<(String, usize)> = service
+            .playlists()
+            .iter()
+            .map(|p| (p.name.clone(), p.items.len()))
+            .collect();
+        assert_eq!(
+            by_name,
+            vec![("All Tracks".to_string(), 1), ("Solo".to_string(), 1)]
+        );
     }
 
     // ---------- shuffle wiring ----------

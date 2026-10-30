@@ -1,6 +1,6 @@
 //! User playlists: CRUD + ordering rules over track ids.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +21,16 @@ pub enum PlaylistError {
     PositionOutOfRange(usize),
 }
 
+/// Planned auto-generated playlist produced by a library scan (see
+/// `domain::scan::auto_playlist_plan`). Ids are stable across scans so a
+/// re-scan updates the existing auto playlist instead of duplicating it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoPlaylistSpec {
+    pub id: String,
+    pub name: String,
+    pub items: Vec<TrackId>,
+}
+
 /// A named, ordered list of track ids.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +40,10 @@ pub struct Playlist {
     pub items: Vec<TrackId>,
     /// Unix timestamp (seconds) of creation.
     pub created_at: u64,
+    /// True for playlists generated from the folder structure; they are
+    /// replaced on every scan and can be pruned automatically.
+    #[serde(default)]
+    pub auto_generated: bool,
 }
 
 /// Collection of playlists ordered by name (BTreeMap keeps it sorted).
@@ -80,9 +94,62 @@ impl PlaylistCollection {
             name: name.to_string(),
             items: Vec::new(),
             created_at,
+            auto_generated: false,
         };
         self.playlists.insert(playlist.id.clone(), playlist.clone());
         Ok(playlist)
+    }
+
+    /// Replaces all auto-generated playlists with `specs` (a scan result).
+    ///
+    /// Rules:
+    /// - auto playlists missing from `specs` are removed (folder deleted);
+    /// - existing auto playlists with the same id are updated in place;
+    /// - manual playlists are never modified or removed;
+    /// - if a *manual* playlist already owns a planned name, the auto
+    ///   playlist for that name is skipped (user data wins).
+    ///
+    /// Returns true when the collection changed.
+    pub fn sync_auto(&mut self, specs: &[AutoPlaylistSpec], now: u64) -> bool {
+        let before = self.playlists.len();
+        let planned_ids: HashSet<String> = specs.iter().map(|s| s.id.clone()).collect();
+        self.playlists
+            .retain(|_, p| !p.auto_generated || planned_ids.contains(&p.id));
+
+        let mut changed = before != self.playlists.len();
+        for spec in specs {
+            let name_taken_by_manual = self
+                .playlists
+                .values()
+                .any(|p| !p.auto_generated && p.id != spec.id && p.name.eq_ignore_ascii_case(&spec.name));
+            if name_taken_by_manual {
+                continue;
+            }
+            match self.playlists.get_mut(&spec.id) {
+                Some(existing) if existing.auto_generated => {
+                    if existing.name != spec.name || existing.items != spec.items {
+                        existing.name = spec.name.clone();
+                        existing.items = spec.items.clone();
+                        changed = true;
+                    }
+                }
+                Some(_) => {} // manual playlist owns this id: leave it alone
+                None => {
+                    self.playlists.insert(
+                        spec.id.clone(),
+                        Playlist {
+                            id: spec.id.clone(),
+                            name: spec.name.clone(),
+                            items: spec.items.clone(),
+                            created_at: now,
+                            auto_generated: true,
+                        },
+                    );
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 
     /// Renames a playlist; the new name must be unique and non-empty.
@@ -251,5 +318,86 @@ mod tests {
         c.create("Alpha", "a".into(), 2).unwrap();
         let names: Vec<&str> = c.list().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["Alpha", "Zeta"]);
+    }
+
+    // ---------- auto playlists ----------
+
+    fn spec(id: &str, name: &str, items: &[&str]) -> AutoPlaylistSpec {
+        AutoPlaylistSpec {
+            id: id.into(),
+            name: name.into(),
+            items: items.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn sync_auto_creates_updates_and_prunes() {
+        let mut c = PlaylistCollection::new();
+        c.create("Chill", "p1".into(), 100).unwrap(); // manual playlist
+
+        // First scan: two auto playlists appear.
+        let changed = c.sync_auto(
+            &[spec("auto:all", "All Tracks", &["a", "b"]), spec("auto:dir:X", "X", &["a"])],
+            200,
+        );
+        assert!(changed);
+        assert_eq!(c.len(), 3);
+        assert!(c.get("auto:all").unwrap().auto_generated);
+
+        // Second scan: folder X renamed to Y (id gone -> pruned), All grows.
+        let changed = c.sync_auto(
+            &[spec("auto:all", "All Tracks", &["a", "b", "c"]), spec("auto:dir:Y", "Y", &["b", "c"])],
+            300,
+        );
+        assert!(changed);
+        assert!(c.get("auto:dir:X").is_none());
+        assert_eq!(c.get("auto:all").unwrap().items.len(), 3);
+        assert_eq!(c.get("auto:dir:Y").unwrap().items, vec!["b".to_string(), "c".to_string()]);
+        // Manual playlist untouched.
+        assert_eq!(c.get("p1").unwrap().name, "Chill");
+        assert_eq!(c.get("p1").unwrap().items, Vec::<String>::new());
+
+        // Idempotent rescan reports no change.
+        assert!(!c.sync_auto(
+            &[spec("auto:all", "All Tracks", &["a", "b", "c"]), spec("auto:dir:Y", "Y", &["b", "c"])],
+            400
+        ));
+    }
+
+    #[test]
+    fn sync_auto_never_touches_manual_playlists() {
+        let mut c = PlaylistCollection::new();
+        c.create("All Tracks", "manual".into(), 1).unwrap();
+        // A manual playlist already owns the name: the auto one is skipped.
+        c.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c.get("manual").unwrap().items, Vec::<String>::new());
+        assert!(!c.get("manual").unwrap().auto_generated);
+
+        // A manual playlist cannot be hijacked even if it uses an auto id.
+        let mut c2 = PlaylistCollection::new();
+        c2.playlists.insert(
+            "auto:all".into(),
+            Playlist {
+                id: "auto:all".into(),
+                name: "Mine".into(),
+                items: vec!["z".into()],
+                created_at: 1,
+                auto_generated: false,
+            },
+        );
+        c2.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
+        assert_eq!(c2.get("auto:all").unwrap().name, "Mine");
+        assert_eq!(c2.get("auto:all").unwrap().items, vec!["z".to_string()]);
+    }
+
+    #[test]
+    fn auto_playlist_json_is_backward_compatible() {
+        // Old caches lack `autoGenerated`; it must deserialize as false.
+        let json = r#"{"id":"p1","name":"Chill","items":["a"],"createdAt":5}"#;
+        let playlist: Playlist = serde_json::from_str(json).unwrap();
+        assert!(!playlist.auto_generated);
+        let serialized = serde_json::to_value(&playlist).unwrap();
+        assert_eq!(serialized["autoGenerated"], false);
     }
 }
