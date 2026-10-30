@@ -21,8 +21,10 @@ pub enum MetadataError {
 /// Abstraction over tag reading so services can be unit-tested.
 pub trait MetadataReader: Send + Sync {
     /// Reads tags + audio properties. The display title is always derived
-    /// from the file name; tags only fill artist/album/genre/etc. Fails only
-    /// on IO errors.
+    /// from the file name; tags only fill artist/album/genre/etc. A broken
+    /// or unsupported tag degrades to a stem-based track instead of failing,
+    /// so the file still lands in the library (and its folder playlist).
+    /// Only IO errors (unreadable file) are reported as errors.
     fn read_track(&self, path: &Path) -> Result<Track, MetadataError>;
 }
 
@@ -32,10 +34,18 @@ pub struct LoftyMetadataReader;
 impl MetadataReader for LoftyMetadataReader {
     fn read_track(&self, path: &Path) -> Result<Track, MetadataError> {
         let size = path.metadata()?.len();
-        let file = Probe::open(path)?.read()?;
-        let duration_secs = file.properties().duration().as_secs_f64();
-        let tag = file.primary_tag().or_else(|| file.first_tag());
-        Ok(map_tag(path, size, tag, duration_secs))
+        let track = match Probe::open(path)?.read() {
+            Ok(file) => {
+                let duration_secs = file.properties().duration().as_secs_f64();
+                let tag = file.primary_tag().or_else(|| file.first_tag());
+                map_tag(path, size, tag, duration_secs)
+            }
+            // A corrupt/unsupported tag must NOT hide the file from the
+            // library: that would silently drop it from the auto playlists
+            // too. Degrade to a stem-based track with unknown duration.
+            Err(_) => Track::from_stem(path, size),
+        };
+        Ok(track)
     }
 }
 
@@ -199,5 +209,30 @@ mod tests {
             .read_track(Path::new("Z:/nope/missing.mp3"))
             .unwrap_err();
         assert!(matches!(err, MetadataError::Io(_)));
+    }
+
+    #[test]
+    fn read_track_degrades_to_stem_when_audio_parsing_fails() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("吸血鬼日记 01.mp3");
+        // Plain ASCII text cannot parse as an MP3 stream: lofty must fail,
+        // and the reader must still produce a stem-based track so the file
+        // shows up in the library and its folder playlist.
+        std::fs::write(&path, b"this is definitely not audio data ..........").unwrap();
+
+        let track = LoftyMetadataReader.read_track(&path).unwrap();
+        assert_eq!(track.title, "吸血鬼日记 01");
+        assert_eq!(track.artist, None);
+        assert_eq!(track.duration_secs, None);
+        assert_eq!(track.id, path.to_string_lossy().into_owned());
+    }
+
+    #[test]
+    fn read_track_degrades_for_empty_file_with_audio_extension() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("Empty.flac");
+        std::fs::write(&path, b"").unwrap();
+        let track = LoftyMetadataReader.read_track(&path).unwrap();
+        assert_eq!(track.title, "Empty");
     }
 }

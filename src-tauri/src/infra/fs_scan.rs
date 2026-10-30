@@ -26,7 +26,10 @@ pub struct WalkdirScanner;
 impl LibraryScanner for WalkdirScanner {
     fn scan(&self, root: &Path) -> ScannedFiles {
         let mut out = ScannedFiles::default();
-        for entry in walkdir::WalkDir::new(root).follow_links(false) {
+        // Follow symlinks/junctions: Windows libraries frequently contain
+        // directory junctions, and not following them silently skips whole
+        // subfolders from the scan. walkdir detects symlink loops itself.
+        for entry in walkdir::WalkDir::new(root).follow_links(true) {
             match entry {
                 Ok(entry) => {
                     if entry.file_type().is_file() && is_audio_file(entry.path()) {
@@ -79,5 +82,58 @@ mod tests {
         let result = WalkdirScanner.scan(Path::new("Z:/definitely/not/here"));
         assert!(result.files.is_empty());
         assert_eq!(result.warnings.len(), 1);
+    }
+
+    /// Symlinked/junctioned subfolders must be traversed, otherwise whole
+    /// folders silently disappear from scans (common on Windows).
+    #[test]
+    #[cfg(windows)]
+    fn scan_traverses_symlinked_subfolders() {
+        use std::os::windows::fs::symlink_dir;
+
+        let root = TempDir::new().unwrap();
+        // The real folder lives OUTSIDE the scan root so the file is only
+        // reachable through the link (no duplicate results).
+        let outside = TempDir::new().unwrap();
+        let real = outside.path().join("吸血鬼日记");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("track.mp3"), b"x").unwrap();
+
+        let link = root.path().join("吸血鬼日记");
+        if symlink_dir(&real, &link).is_err() {
+            // Creating symlinks needs admin/developer mode; skip where the
+            // OS refuses rather than failing the suite.
+            eprintln!("symlink_dir refused by the OS; skipping this check");
+            return;
+        }
+
+        let result = WalkdirScanner.scan(root.path());
+        let found: Vec<String> = result
+            .files
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(found.len(), 1, "linked folder must be traversed: {found:?}");
+        assert!(found[0].ends_with("track.mp3"), "{found:?}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn scan_traverses_symlinked_subfolders() {
+        let root = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let real = outside.path().join("linked-lib");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("track.mp3"), b"x").unwrap();
+
+        let link = root.path().join("linked-lib");
+        if std::os::unix::fs::symlink(&real, &link).is_err() {
+            eprintln!("symlink refused by the OS; skipping this check");
+            return;
+        }
+
+        let result = WalkdirScanner.scan(root.path());
+        assert_eq!(result.files.len(), 1);
+        assert!(result.files[0].ends_with("track.mp3"));
     }
 }
