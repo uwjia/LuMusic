@@ -295,6 +295,37 @@ button {
   flex-direction: column;
 }
 
+/* ---------- scrollbars (reveal on hover) ---------- */
+
+/* Scrollbars stay invisible until the pointer enters the scroll area;
+   scrolling itself still works (wheel, trackpad, keyboard). */
+.sidebar::-webkit-scrollbar,
+.track-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.sidebar::-webkit-scrollbar-track,
+.track-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb,
+.track-body::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+
+.sidebar:hover::-webkit-scrollbar-thumb,
+.track-body:hover::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover,
+.track-body::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-2);
+}
+
 /* ---------- pages ---------- */
 
 .page {

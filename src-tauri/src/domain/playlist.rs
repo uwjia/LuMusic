@@ -102,53 +102,73 @@ impl PlaylistCollection {
 
     /// Replaces all auto-generated playlists with `specs` (a scan result).
     ///
-    /// Rules:
-    /// - auto playlists missing from `specs` are removed (folder deleted);
-    /// - existing auto playlists with the same id are updated in place;
-    /// - manual playlists are never modified or removed;
-    /// - if a *manual* playlist already owns a planned name, the auto
-    ///   playlist keeps its id but renames itself with a `(folder)` suffix -
-    ///   it must never silently disappear from the sidebar. Once the manual
-    ///   playlist is renamed/deleted, the next scan restores the plain name.
+    /// Overwrite semantics - repeated scans never multiply playlists:
+    /// - each spec maps to exactly one target playlist: an existing auto
+    ///   playlist with the spec id, or a *manual* playlist with the same
+    ///   (case-insensitive) name, which is **adopted** - its items are
+    ///   overwritten with the scan result and it becomes auto-generated;
+    /// - auto playlists that no spec targets are removed (folder deleted);
+    /// - manual playlists whose name matches no scanned folder are never
+    ///   touched;
+    /// - a manual playlist merely squatting a spec *id* (not the name) is
+    ///   never hijacked.
     ///
     /// Returns true when the collection changed.
     pub fn sync_auto(&mut self, specs: &[AutoPlaylistSpec], now: u64) -> bool {
-        let before = self.playlists.len();
-        let planned_ids: HashSet<String> = specs.iter().map(|s| s.id.clone()).collect();
-        self.playlists
-            .retain(|_, p| !p.auto_generated || planned_ids.contains(&p.id));
-
-        let mut changed = before != self.playlists.len();
-        // Manual playlist names are unique case-insensitively; mirror that
-        // when detecting collisions.
-        let manual_names: HashSet<String> = self
-            .playlists
-            .values()
-            .filter(|p| !p.auto_generated)
-            .map(|p| p.name.to_lowercase())
-            .collect();
-
+        // Step 1: resolve every spec to its target playlist id. A playlist
+        // (manual or auto) with the same name wins over the spec id, so an
+        // adopted playlist stays the target of every future scan.
+        let mut resolved: Vec<(&AutoPlaylistSpec, String, bool)> = Vec::with_capacity(specs.len());
+        let mut target_ids: HashSet<String> = HashSet::with_capacity(specs.len());
+        let mut used: HashSet<String> = HashSet::new();
         for spec in specs {
-            let name = if manual_names.contains(&spec.name.to_lowercase()) {
-                format!("{} (folder)", spec.name)
-            } else {
-                spec.name.clone()
+            let by_name = self
+                .playlists
+                .iter()
+                .find(|(id, p)| !used.contains(*id) && p.name.eq_ignore_ascii_case(&spec.name))
+                .map(|(id, _)| id.clone());
+            let (id, adopted) = match by_name {
+                Some(id) => {
+                    let was_manual = !self.playlists[&id].auto_generated;
+                    used.insert(id.clone());
+                    (id, was_manual)
+                }
+                None => {
+                    used.insert(spec.id.clone());
+                    (spec.id.clone(), false)
+                }
             };
-            match self.playlists.get_mut(&spec.id) {
-                Some(existing) if existing.auto_generated => {
-                    if existing.name != name || existing.items != spec.items {
-                        existing.name = name;
+            target_ids.insert(id.clone());
+            resolved.push((spec, id, adopted));
+        }
+
+        // Step 2: prune auto playlists that no spec targets.
+        let before = self.playlists.len();
+        self.playlists
+            .retain(|_, p| !p.auto_generated || target_ids.contains(&p.id));
+        let mut changed = before != self.playlists.len();
+
+        // Step 3: write the scan result into each target.
+        for (spec, id, adopted) in resolved {
+            match self.playlists.get_mut(&id) {
+                // Adopted manual playlist or existing auto playlist:
+                // overwrite items in place, keep id/name/created_at.
+                Some(existing) if adopted || existing.auto_generated => {
+                    if !existing.auto_generated || existing.items != spec.items {
                         existing.items = spec.items.clone();
+                        existing.auto_generated = true;
                         changed = true;
                     }
                 }
-                Some(_) => {} // manual playlist owns this id: leave it alone
+                // A manual playlist squatting this id without a name match
+                // must not be hijacked; drop the spec instead.
+                Some(_) => {}
                 None => {
                     self.playlists.insert(
-                        spec.id.clone(),
+                        id.clone(),
                         Playlist {
-                            id: spec.id.clone(),
-                            name,
+                            id,
+                            name: spec.name.clone(),
                             items: spec.items.clone(),
                             created_at: now,
                             auto_generated: true,
@@ -374,28 +394,66 @@ mod tests {
     }
 
     #[test]
-    fn sync_auto_never_touches_manual_playlists() {
+    fn sync_auto_adopts_manual_playlist_with_same_name() {
         let mut c = PlaylistCollection::new();
-        c.create("All Tracks", "manual".into(), 1).unwrap();
-        // A manual playlist owns the name: the auto one must still exist (it
-        // renames itself) instead of silently disappearing.
+        c.create("吸血鬼日记", "pl-1".into(), 1).unwrap();
+        // Leftover twin from the old "(folder)" behavior.
+        c.playlists.insert(
+            "auto:dir:吸血鬼日记".into(),
+            Playlist {
+                id: "auto:dir:吸血鬼日记".into(),
+                name: "吸血鬼日记 (folder)".into(),
+                items: vec!["stale".into()],
+                created_at: 1,
+                auto_generated: true,
+            },
+        );
+
+        let changed = c.sync_auto(&[spec("auto:dir:吸血鬼日记", "吸血鬼日记", &["a", "b"])], 2);
+        assert!(changed);
+        // The manual playlist was adopted: same id/name, scan result inside.
+        let adopted = c.get("pl-1").unwrap();
+        assert!(adopted.auto_generated);
+        assert_eq!(adopted.items, vec!["a".to_string(), "b".to_string()]);
+        // The twin is gone - exactly one playlist with this name remains.
+        assert!(c.get("auto:dir:吸血鬼日记").is_none());
+        assert_eq!(c.list().len(), 1);
+
+        // Repeated scans stay idempotent.
+        assert!(!c.sync_auto(&[spec("auto:dir:吸血鬼日记", "吸血鬼日记", &["a", "b"])], 3));
+        assert_eq!(c.list().len(), 1);
+    }
+
+    #[test]
+    fn sync_auto_repeated_scans_never_duplicate() {
+        let mut c = PlaylistCollection::new();
+        let specs = vec![
+            spec("auto:all", "All Tracks", &["a"]),
+            spec("auto:dir:X", "X", &["a"]),
+        ];
+        c.sync_auto(&specs, 1);
+        for _ in 0..3 {
+            c.sync_auto(&specs, 2);
+        }
+        assert_eq!(c.list().len(), 2);
+        assert_eq!(c.get("auto:all").unwrap().items.len(), 1);
+    }
+
+    #[test]
+    fn sync_auto_leaves_unrelated_manual_playlists_alone() {
+        let mut c = PlaylistCollection::new();
+        c.create("My Mix", "m".into(), 1).unwrap();
+        c.add_track("m", "z".into()).unwrap();
         c.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
-        assert_eq!(c.len(), 2);
-        assert_eq!(c.get("auto:all").unwrap().name, "All Tracks (folder)");
-        assert_eq!(c.get("auto:all").unwrap().items, vec!["a".to_string()]);
-        // The manual playlist is untouched.
-        assert_eq!(c.get("manual").unwrap().name, "All Tracks");
-        assert_eq!(c.get("manual").unwrap().items, Vec::<String>::new());
-        assert!(!c.get("manual").unwrap().auto_generated);
+        let manual = c.get("m").unwrap();
+        assert!(!manual.auto_generated);
+        assert_eq!(manual.items, vec!["z".to_string()]);
+    }
 
-        // Once the collision is gone, the auto playlist takes the plain name.
-        c.rename("manual", "My Picks").unwrap();
-        c.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 3);
-        assert_eq!(c.get("auto:all").unwrap().name, "All Tracks");
-
-        // A manual playlist cannot be hijacked even if it uses an auto id.
-        let mut c2 = PlaylistCollection::new();
-        c2.playlists.insert(
+    #[test]
+    fn sync_auto_does_not_hijack_manual_playlist_squatting_an_auto_id() {
+        let mut c = PlaylistCollection::new();
+        c.playlists.insert(
             "auto:all".into(),
             Playlist {
                 id: "auto:all".into(),
@@ -405,17 +463,9 @@ mod tests {
                 auto_generated: false,
             },
         );
-        c2.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
-        assert_eq!(c2.get("auto:all").unwrap().name, "Mine");
-        assert_eq!(c2.get("auto:all").unwrap().items, vec!["z".to_string()]);
-    }
-
-    #[test]
-    fn sync_auto_collision_is_case_insensitive() {
-        let mut c = PlaylistCollection::new();
-        c.create("VAMPIRE", "m".into(), 1).unwrap();
-        c.sync_auto(&[spec("auto:dir:v", "vampire", &["a"])], 2);
-        assert_eq!(c.get("auto:dir:v").unwrap().name, "vampire (folder)");
+        c.sync_auto(&[spec("auto:all", "All Tracks", &["a"])], 2);
+        assert_eq!(c.get("auto:all").unwrap().name, "Mine");
+        assert_eq!(c.get("auto:all").unwrap().items, vec!["z".to_string()]);
     }
 
     #[test]
