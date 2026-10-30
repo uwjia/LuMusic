@@ -76,6 +76,9 @@ button {
 }
 
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 36px;
   height: 36px;
   border: none;
@@ -353,6 +356,26 @@ button {
   gap: 8px;
 }
 
+.header-rename {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-rename input {
+  width: 220px;
+  padding: 7px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg-0);
+}
+
+.page-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .search-input,
 .folder-input {
   flex: 0 1 320px;
@@ -544,6 +567,15 @@ button {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.language-switch {
+  margin-bottom: 8px;
+}
+
+/* 中文与英文按钮宽度一致，切换时不跳动 */
+.language-switch .btn {
+  min-width: 110px;
 }
 
 /* ---------- player bar ---------- */

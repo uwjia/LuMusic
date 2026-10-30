@@ -1,12 +1,12 @@
 // Behavior tests for the transport bar (store + api mocked at the seam).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { api } from '../../api';
-import type { PlayerState, Track } from '../../types/track';
-import { usePlayerStore } from '../../stores/playerStore';
-import { PlayerBar } from './PlayerBar';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { api } from '@/api';
+import type { PlayerState, Track } from '@/types/track';
+import { usePlayerStore } from '@/stores/playerStore';
+import { PlayerBar } from '@/features/player/PlayerBar';
 
-vi.mock('../../api', () => ({
+vi.mock('@/api', () => ({
   api: {
     playerState: vi.fn(),
     playerToggle: vi.fn(),
@@ -85,16 +85,32 @@ describe('PlayerBar', () => {
     await vi.waitFor(() => expect(api.playerNext).toHaveBeenCalled());
   });
 
-  it('cycle repeat goes off -> all and marks the button active', async () => {
-    vi.mocked(api.playerSetMode).mockResolvedValue(state({ repeat: 'all' }));
-    usePlayerStore.setState({ state: state({ repeat: 'off' }) });
+  it('play mode button shows the current mode and advances it through the api', async () => {
+    vi.mocked(api.playerSetMode).mockResolvedValue(state({ shuffle: false, repeat: 'all' }));
+    usePlayerStore.setState({ state: state({ shuffle: false, repeat: 'off' }) });
     render(<PlayerBar />);
-    const repeatBtn = screen.getByTestId('repeat-btn');
-    expect(repeatBtn).not.toHaveClass('is-active');
-    fireEvent.click(repeatBtn);
+    const modeBtn = screen.getByTestId('play-mode-btn');
+    expect(modeBtn).toHaveAttribute('aria-label', 'Sequential play');
+    expect(modeBtn).not.toHaveClass('is-active');
+    // Sequential mode is drawn as the list-play SVG icon, not a text glyph.
+    expect(modeBtn.querySelector('svg')).toBeInTheDocument();
+    fireEvent.click(modeBtn);
     await vi.waitFor(() =>
       expect(api.playerSetMode).toHaveBeenCalledWith(false, 'all'),
     );
+  });
+
+  it('shuffle mode lights the button up and clicking returns to sequential', async () => {
+    vi.mocked(api.playerSetMode).mockResolvedValue(state({ shuffle: false, repeat: 'off' }));
+    usePlayerStore.setState({ state: state({ shuffle: true, repeat: 'all' }) });
+    render(<PlayerBar />);
+    const modeBtn = screen.getByTestId('play-mode-btn');
+    expect(modeBtn).toHaveClass('is-active');
+    expect(modeBtn).toHaveAttribute('aria-label', 'Shuffle');
+    // All modes render the unified SVG family, never a text/emoji glyph.
+    expect(modeBtn.querySelector('svg')).toBeInTheDocument();
+    fireEvent.click(modeBtn);
+    await vi.waitFor(() => expect(api.playerSetMode).toHaveBeenCalledWith(false, 'off'));
   });
 
   it('volume slider commits on release', async () => {
@@ -105,6 +121,22 @@ describe('PlayerBar', () => {
     fireEvent.change(slider, { target: { value: '0.9' } });
     fireEvent.pointerUp(slider);
     await vi.waitFor(() => expect(api.playerSetVolume).toHaveBeenCalledWith(0.9));
+  });
+
+  it('mouse wheel over the volume slider adjusts volume through the api', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.playerSetVolume).mockResolvedValue(state({ volume: 0.55 }));
+      usePlayerStore.setState({ state: state({ volume: 0.5 }) });
+      render(<PlayerBar />);
+      fireEvent.wheel(screen.getByTestId('volume-slider'), { deltaY: -120 });
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+      expect(api.playerSetVolume).toHaveBeenCalledWith(0.55);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('seek slider commits the dragged position', async () => {

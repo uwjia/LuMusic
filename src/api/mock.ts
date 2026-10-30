@@ -5,7 +5,7 @@
 // - playback auto-advance follows repeat/shuffle rules;
 // - events fire through the same subscription callbacks.
 
-import type { PlayerApi, Unsubscribe } from './types';
+import type { PlayerApi, Unsubscribe } from '@/api/types';
 import type {
   PlayerState,
   Playlist,
@@ -14,7 +14,7 @@ import type {
   ScanSummary,
   Track,
   TrackQuery,
-} from '../types/track';
+} from '@/types/track';
 
 const TRACKS_ROOT = 'C:/mock-music';
 

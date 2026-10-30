@@ -1,8 +1,10 @@
 // Playlist store: list + the selected playlist's tracks.
 
 import { create } from 'zustand';
-import { api } from '../api';
-import type { Playlist, Track } from '../types/track';
+import { api } from '@/api';
+import { t } from '@/i18n';
+import { displayPlaylistName } from '@/lib/playlistDisplay';
+import type { Playlist, Track } from '@/types/track';
 
 interface PlaylistStoreState {
   playlists: Playlist[];
@@ -15,6 +17,7 @@ interface PlaylistStoreState {
   create: (name: string) => Promise<boolean>;
   rename: (id: string, newName: string) => Promise<boolean>;
   remove: (id: string) => Promise<boolean>;
+  duplicate: (id: string) => Promise<boolean>;
   addTrack: (trackId: string) => Promise<boolean>;
   removeTrack: (trackId: string) => Promise<boolean>;
   moveTrack: (from: number, to: number) => Promise<boolean>;
@@ -77,6 +80,32 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
       if (get().selectedId === id) {
         set({ selectedId: null, selectedTracks: [] });
       }
+      await get().load();
+    }),
+
+  // There is no dedicated backend command; copying is composed from the
+  // existing api surface: create the copy, then replay every track in order.
+  duplicate: (id) =>
+    guard(set, async () => {
+      const source = get().playlists.find((p) => p.id === id);
+      if (!source) throw new Error('playlist not found');
+      // The "(copy)" suffix is locale-aware ("（副本）" in Chinese); the
+      // first untaken name is picked so repeated duplicates don't fail on
+      // the DuplicateName check. Copies are manual playlists, so they are
+      // named after the *display* name (a Chinese UI duplicating "Default"
+      // should read "默认歌单（副本）", not mix scripts).
+      const baseName = displayPlaylistName(source, t);
+      const taken = new Set(get().playlists.map((p) => p.name.toLowerCase()));
+      let name = t('playlist.copyName', { name: baseName });
+      for (let n = 2; taken.has(name.toLowerCase()); n += 1) {
+        name = t('playlist.copyNameN', { name: baseName, n });
+      }
+      const created = await api.playlistCreate(name);
+      for (const trackId of source.items) {
+        await api.playlistAddTrack(created.id, trackId);
+      }
+      // Keep the source selected: the page stays on the playlist the user
+      // is looking at; the copy shows up in the sidebar list.
       await get().load();
     }),
 

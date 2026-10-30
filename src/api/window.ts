@@ -6,7 +6,7 @@
 // runtime by whether the WebView injected `__TAURI_INTERNALS__`.
 
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Unsubscribe } from './types';
+import type { Unsubscribe } from '@/api/types';
 
 export interface WindowApi {
   /** True inside the real Tauri window; false in browser/tests. */

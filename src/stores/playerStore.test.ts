@@ -1,10 +1,14 @@
 // Behavior tests for the player store (api layer is mocked).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../api';
-import type { PlayerState } from '../types/track';
-import { nextRepeatMode, usePlayerStore } from './playerStore';
+import { api } from '@/api';
+import type { PlayerState } from '@/types/track';
+import {
+  nextPlayMode,
+  playModeOf,
+  usePlayerStore,
+} from '@/stores/playerStore';
 
-vi.mock('../api', () => ({
+vi.mock('@/api', () => ({
   api: {
     playerState: vi.fn(),
     playerToggle: vi.fn(),
@@ -64,45 +68,53 @@ describe('playerStore', () => {
     expect(api.playerLoad).toHaveBeenCalledWith(['a', 'b'], 1);
   });
 
-  it('setShuffle keeps repeat untouched', async () => {
-    const state = playing({ shuffle: true, repeat: 'one' });
-    vi.mocked(api.playerSetMode).mockResolvedValue(state);
-    await usePlayerStore.getState().setShuffle(true);
-    expect(api.playerSetMode).toHaveBeenCalledWith(true);
-    expect(usePlayerStore.getState().state?.repeat).toBe('one');
-  });
-
-  it('cycleRepeat walks off -> all -> one -> off preserving shuffle', async () => {
-    let current = idle;
+  it('cyclePlayMode walks sequential -> repeat all -> repeat one -> shuffle', async () => {
+    // Mirror the backend: echo the requested flags back as the new state.
     vi.mocked(api.playerSetMode).mockImplementation(
       async (shuffle?: boolean, repeat?: PlayerState['repeat']) =>
         playing({ shuffle: shuffle ?? false, repeat: repeat ?? 'off' }),
     );
-    const cycle = async () => {
-      usePlayerStore.setState({ state: current });
-      await usePlayerStore.getState().cycleRepeat();
-      current = usePlayerStore.getState().state ?? idle;
+    const step = async (from: Partial<PlayerState>) => {
+      usePlayerStore.setState({ state: playing(from) });
+      await usePlayerStore.getState().cyclePlayMode();
     };
 
-    await cycle();
-    expect(current.repeat).toBe('all');
-    await cycle();
-    expect(current.repeat).toBe('one');
-    await cycle();
-    expect(current.repeat).toBe('off');
+    await step({ shuffle: false, repeat: 'off' });
+    expect(api.playerSetMode).toHaveBeenLastCalledWith(false, 'all');
 
-    // Shuffle flag survives the cycle.
-    usePlayerStore.setState({ state: playing({ shuffle: true, repeat: 'off' }) });
-    await usePlayerStore.getState().cycleRepeat();
-    expect(usePlayerStore.getState().state?.shuffle).toBe(true);
+    await step({ shuffle: false, repeat: 'all' });
+    expect(api.playerSetMode).toHaveBeenLastCalledWith(false, 'one');
+
+    await step({ shuffle: false, repeat: 'one' });
+    // Shuffle keeps the queue wrapping so random play never dead-ends.
     expect(api.playerSetMode).toHaveBeenLastCalledWith(true, 'all');
+
+    await step({ shuffle: true, repeat: 'all' });
+    expect(api.playerSetMode).toHaveBeenLastCalledWith(false, 'off');
+
+    expect(api.playerSetMode).toHaveBeenCalledTimes(4);
+  });
+
+  it('cyclePlayMode before the first state fetch starts from sequential', async () => {
+    vi.mocked(api.playerSetMode).mockResolvedValue(playing({ repeat: 'all' }));
+    await usePlayerStore.getState().cyclePlayMode();
+    expect(api.playerSetMode).toHaveBeenCalledWith(false, 'all');
   });
 });
 
-describe('nextRepeatMode', () => {
-  it('follows the UI cycle order', () => {
-    expect(nextRepeatMode('off')).toBe('all');
-    expect(nextRepeatMode('all')).toBe('one');
-    expect(nextRepeatMode('one')).toBe('off');
+describe('play mode helpers', () => {
+  it('nextPlayMode follows the UI cycle order', () => {
+    expect(nextPlayMode('sequential')).toBe('repeatAll');
+    expect(nextPlayMode('repeatAll')).toBe('repeatOne');
+    expect(nextPlayMode('repeatOne')).toBe('shuffle');
+    expect(nextPlayMode('shuffle')).toBe('sequential');
+  });
+
+  it('playModeOf derives the mode, shuffle flag winning over repeat', () => {
+    expect(playModeOf({ shuffle: false, repeat: 'off' })).toBe('sequential');
+    expect(playModeOf({ shuffle: false, repeat: 'all' })).toBe('repeatAll');
+    expect(playModeOf({ shuffle: false, repeat: 'one' })).toBe('repeatOne');
+    expect(playModeOf({ shuffle: true, repeat: 'off' })).toBe('shuffle');
+    expect(playModeOf({ shuffle: true, repeat: 'one' })).toBe('shuffle');
   });
 });

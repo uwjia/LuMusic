@@ -1,25 +1,34 @@
 // Bottom transport bar: play controls, seek, volume, now-playing title.
 
-import { formatDuration } from '../../lib/format';
-import { Slider } from '../../components/ui/Slider';
-import { IconButton } from '../../components/ui/IconButton';
-import { usePlayerStore } from '../../stores/playerStore';
-import { nextRepeatMode } from '../../stores/playerStore';
-
-const REPEAT_LABEL: Record<string, string> = { off: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
-const REPEAT_SHORT: Record<string, string> = { off: '↻', all: '↻', one: '↻¹' };
+import { formatDuration } from '@/lib/format';
+import { Slider } from '@/components/ui/Slider';
+import { IconButton } from '@/components/ui/IconButton';
+import { useTranslation } from '@/i18n';
+import { playModeOf, usePlayerStore, type PlayMode } from '@/stores/playerStore';
+import { MODE_ICON } from '@/features/player/ModeIcons';
+const MODE_LABEL_KEY: Record<
+  PlayMode,
+  'player.modeSequential' | 'player.repeatAll' | 'player.repeatOne' | 'player.shuffle'
+> = {
+  sequential: 'player.modeSequential',
+  repeatAll: 'player.repeatAll',
+  repeatOne: 'player.repeatOne',
+  shuffle: 'player.shuffle',
+};
 
 export function PlayerBar() {
   const state = usePlayerStore((s) => s.state);
   const error = usePlayerStore((s) => s.error);
-  const { toggle, next, prev, seek, setVolume, setShuffle, cycleRepeat } = usePlayerStore.getState();
+  const { toggle, next, prev, seek, setVolume, cyclePlayMode } = usePlayerStore.getState();
+  const { t } = useTranslation();
 
   if (!state) {
-    return <footer className="player-bar player-bar-empty">Loading player…</footer>;
+    return <footer className="player-bar player-bar-empty">{t('player.loading')}</footer>;
   }
 
   const playing = state.status === 'playing';
   const duration = state.durationSecs ?? 0;
+  const mode = playModeOf(state);
 
   return (
     <footer className="player-bar" data-status={state.status}>
@@ -27,45 +36,44 @@ export function PlayerBar() {
         {state.currentTrack ? (
           <>
             <div className="now-playing-title">{state.currentTrack.title}</div>
-            <div className="now-playing-artist">{state.currentTrack.artist ?? 'Unknown artist'}</div>
+            <div className="now-playing-artist">
+              {state.currentTrack.artist ?? t('player.unknownArtist')}
+            </div>
           </>
         ) : (
-          <div className="now-playing-title muted">Nothing playing</div>
+          <div className="now-playing-title muted">{t('player.nothingPlaying')}</div>
         )}
       </div>
 
       <div className="transport">
         <div className="transport-buttons">
-          <IconButton label="Shuffle" active={state.shuffle} onClick={() => void setShuffle(!state.shuffle)}>
-            🔀
+          <IconButton
+            label={t(MODE_LABEL_KEY[mode])}
+            active={mode !== 'sequential'}
+            onClick={() => void cyclePlayMode()}
+            data-testid="play-mode-btn"
+          >
+            {MODE_ICON[mode]}
           </IconButton>
-          <IconButton label="Previous track" onClick={() => void prev()}>
+          <IconButton label={t('player.prev')} onClick={() => void prev()}>
             ⏮
           </IconButton>
           <IconButton
-            label={playing ? 'Pause' : 'Play'}
+            label={playing ? t('player.pause') : t('player.play')}
             className="play-btn"
             onClick={() => void toggle()}
             data-testid="play-toggle"
           >
             {playing ? '⏸' : '▶'}
           </IconButton>
-          <IconButton label="Next track" onClick={() => void next()}>
+          <IconButton label={t('player.next')} onClick={() => void next()}>
             ⏭
-          </IconButton>
-          <IconButton
-            label={REPEAT_LABEL[state.repeat] ?? 'Repeat'}
-            active={state.repeat !== 'off'}
-            onClick={() => void cycleRepeat()}
-            data-testid="repeat-btn"
-          >
-            {REPEAT_SHORT[state.repeat] ?? '↻'}
           </IconButton>
         </div>
         <div className="progress">
           <span className="time">{formatDuration(state.positionSecs)}</span>
           <Slider
-            aria-label="Seek"
+            aria-label={t('player.seek')}
             data-testid="seek-slider"
             min={0}
             max={Math.max(duration, 0.1)}
@@ -81,12 +89,13 @@ export function PlayerBar() {
       <div className="volume">
         <span aria-hidden>🔊</span>
         <Slider
-          aria-label="Volume"
+          aria-label={t('player.volume')}
           data-testid="volume-slider"
           className="volume-slider"
           min={0}
           max={1}
           step={0.01}
+          wheelStep={0.05}
           value={state.volume}
           onCommit={(value) => void setVolume(value)}
         />
@@ -100,6 +109,3 @@ export function PlayerBar() {
     </footer>
   );
 }
-
-// Re-export for tests that want to compute the expected next mode.
-export { nextRepeatMode };

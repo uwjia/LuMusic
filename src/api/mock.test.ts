@@ -1,7 +1,7 @@
 // Behavior tests for the in-memory mock api (kept in lockstep with the
 // backend's auto-playlist rules).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mockApi } from './mock';
+import { mockApi } from '@/api/mock';
 
 beforeEach(async () => {
   vi.useFakeTimers();

@@ -3,8 +3,8 @@
 // the api layer so tests can intercept them.
 
 import { create } from 'zustand';
-import { api } from '../api';
-import type { PlayerState, RepeatMode } from '../types/track';
+import { api } from '@/api';
+import type { PlayerState, RepeatMode } from '@/types/track';
 
 interface PlayerStoreState {
   /** Last known backend state; null until the first fetch completes. */
@@ -23,15 +23,37 @@ interface PlayerStoreState {
   prev: () => Promise<void>;
   seek: (secs: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
-  setShuffle: (shuffle: boolean) => Promise<void>;
-  cycleRepeat: () => Promise<void>;
+  /** Advances the single play-mode button: 顺序 → 列表循环 → 单曲循环 → 随机. */
+  cyclePlayMode: () => Promise<void>;
 }
 
-/** Repeat modes in UI cycle order. */
-export const REPEAT_ORDER: RepeatMode[] = ['off', 'all', 'one'];
+/** The four play modes offered by the single transport button. */
+export type PlayMode = 'sequential' | 'repeatAll' | 'repeatOne' | 'shuffle';
 
-export function nextRepeatMode(current: RepeatMode): RepeatMode {
-  return REPEAT_ORDER[(REPEAT_ORDER.indexOf(current) + 1) % REPEAT_ORDER.length];
+/** Cycle order of the play-mode button. */
+export const PLAY_MODE_ORDER: PlayMode[] = ['sequential', 'repeatAll', 'repeatOne', 'shuffle'];
+
+/**
+ * Backend (shuffle, repeat) flags each UI mode maps to. Shuffle keeps
+ * `repeat: all` so a shuffled session never dead-ends after one pass.
+ */
+const PLAY_MODE_FLAGS: Record<PlayMode, { shuffle: boolean; repeat: RepeatMode }> = {
+  sequential: { shuffle: false, repeat: 'off' },
+  repeatAll: { shuffle: false, repeat: 'all' },
+  repeatOne: { shuffle: false, repeat: 'one' },
+  shuffle: { shuffle: true, repeat: 'all' },
+};
+
+/** Derives the UI mode from any backend state (shuffle flag wins). */
+export function playModeOf(state: Pick<PlayerState, 'shuffle' | 'repeat'>): PlayMode {
+  if (state.shuffle) return 'shuffle';
+  if (state.repeat === 'all') return 'repeatAll';
+  if (state.repeat === 'one') return 'repeatOne';
+  return 'sequential';
+}
+
+export function nextPlayMode(current: PlayMode): PlayMode {
+  return PLAY_MODE_ORDER[(PLAY_MODE_ORDER.indexOf(current) + 1) % PLAY_MODE_ORDER.length];
 }
 
 async function run(
@@ -64,14 +86,13 @@ export const usePlayerStore = create<PlayerStoreState>((set) => ({
   seek: (secs) => run(set, () => api.playerSeek(secs)),
   setVolume: (volume) => run(set, () => api.playerSetVolume(volume)),
 
-  setShuffle: (shuffle) => run(set, () => api.playerSetMode(shuffle)),
-
-  // Repeat cycles off -> all -> one -> off, keeping the current shuffle flag.
-  cycleRepeat: async () => {
+  // Play mode cycles sequential -> repeat all -> repeat one -> shuffle;
+  // each step sends the full (shuffle, repeat) pair so any legacy backend
+  // combination is normalized on the first click.
+  cyclePlayMode: async () => {
     const current = usePlayerStore.getState().state;
-    const nextMode = nextRepeatMode(current?.repeat ?? 'off');
-    await run(set, () =>
-      api.playerSetMode(current?.shuffle ?? false, nextMode),
-    );
+    const next = nextPlayMode(playModeOf(current ?? { shuffle: false, repeat: 'off' }));
+    const flags = PLAY_MODE_FLAGS[next];
+    await run(set, () => api.playerSetMode(flags.shuffle, flags.repeat));
   },
 }));

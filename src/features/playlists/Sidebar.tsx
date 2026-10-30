@@ -1,8 +1,10 @@
 // Sidebar navigation: library, playlists (create/select), settings.
 
 import { useState } from 'react';
-import { usePlaylistStore } from '../../stores/playlistStore';
-import { usePlayerStore } from '../../stores/playerStore';
+import { usePlaylistStore } from '@/stores/playlistStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { useTranslation } from '@/i18n';
+import { displayPlaylistName } from '@/lib/playlistDisplay';
 
 interface SidebarProps {
   view: { kind: 'library' } | { kind: 'settings' } | { kind: 'playlist'; id: string };
@@ -14,6 +16,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
   const error = usePlaylistStore((s) => s.error);
   const { create, select } = usePlaylistStore.getState();
   const currentTrackId = usePlayerStore((s) => s.state?.currentTrack?.id ?? null);
+  const { t } = useTranslation();
 
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -28,17 +31,17 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
   };
 
   return (
-    <nav className="sidebar" aria-label="Navigation">
+    <nav className="sidebar" aria-label={t('nav.navigation')}>
       <button
         type="button"
         className={`nav-item ${view.kind === 'library' ? 'is-active' : ''}`}
         onClick={() => onNavigate({ kind: 'library' })}
       >
-        🎵 Library
+        🎵 {t('nav.library')}
       </button>
 
       <div className="sidebar-section">
-        <div className="sidebar-heading">Playlists</div>
+        <div className="sidebar-heading">{t('nav.playlists')}</div>
         <ul className="playlist-list">
           {playlists.map((playlist) => {
             const playingHere = playlist.items.includes(currentTrackId ?? '');
@@ -55,7 +58,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
                   }}
                 >
                   {playingHere ? '🔊 ' : '🗎 '}
-                  <span className="nav-label">{playlist.name}</span>
+                  <span className="nav-label">{displayPlaylistName(playlist, t)}</span>
                   <span className="muted count">{playlist.items.length}</span>
                 </button>
               </li>
@@ -73,13 +76,13 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
           >
             <input
               autoFocus
-              aria-label="New playlist name"
+              aria-label={t('nav.newPlaylistName')}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onBlur={() => newName.trim() === '' && setCreating(false)}
             />
             <button type="submit" className="btn btn-primary">
-              Add
+              {t('nav.add')}
             </button>
           </form>
         ) : (
@@ -89,7 +92,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
             onClick={() => setCreating(true)}
             data-testid="new-playlist"
           >
-            ＋ New playlist
+            {t('nav.newPlaylist')}
           </button>
         )}
         {error ? <div className="sidebar-error" role="alert">{error}</div> : null}
@@ -100,7 +103,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
         className={`nav-item ${view.kind === 'settings' ? 'is-active' : ''}`}
         onClick={() => onNavigate({ kind: 'settings' })}
       >
-        ⚙ Settings
+        ⚙ {t('nav.settings')}
       </button>
     </nav>
   );

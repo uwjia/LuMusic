@@ -1,8 +1,8 @@
 // Rendering + interaction tests for the track table (pure component).
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { Track } from '../../types/track';
-import { TrackTable } from './TrackTable';
+import type { Track } from '@/types/track';
+import { TrackTable } from '@/features/library/TrackTable';
 
 const track = (id: string, title: string, artist: string, album: string): Track => ({
   id,

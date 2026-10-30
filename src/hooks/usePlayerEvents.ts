@@ -2,10 +2,10 @@
 // Mount once near the app root.
 
 import { useEffect } from 'react';
-import { api } from '../api';
-import { useLibraryStore } from '../stores/libraryStore';
-import { usePlayerStore } from '../stores/playerStore';
-import { usePlaylistStore } from '../stores/playlistStore';
+import { api } from '@/api';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { usePlaylistStore } from '@/stores/playlistStore';
 
 export function usePlayerEvents(): void {
   useEffect(() => {

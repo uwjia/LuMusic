@@ -2,16 +2,16 @@
 // event bridge.
 
 import { useEffect, useState } from 'react';
-import { LibraryPage } from './features/library/LibraryPage';
-import { PlayerBar } from './features/player/PlayerBar';
-import { PlaylistPage } from './features/playlists/PlaylistPage';
-import { Sidebar } from './features/playlists/Sidebar';
-import { SettingsPage } from './features/settings/SettingsPage';
-import { TitleBar } from './features/shell/TitleBar';
-import { usePlayerEvents } from './hooks/usePlayerEvents';
-import { useLibraryStore } from './stores/libraryStore';
-import { usePlayerStore } from './stores/playerStore';
-import { usePlaylistStore } from './stores/playlistStore';
+import { LibraryPage } from '@/features/library/LibraryPage';
+import { PlayerBar } from '@/features/player/PlayerBar';
+import { PlaylistPage } from '@/features/playlists/PlaylistPage';
+import { Sidebar } from '@/features/playlists/Sidebar';
+import { SettingsPage } from '@/features/settings/SettingsPage';
+import { TitleBar } from '@/features/shell/TitleBar';
+import { usePlayerEvents } from '@/hooks/usePlayerEvents';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { usePlaylistStore } from '@/stores/playlistStore';
 
 type View = { kind: 'library' } | { kind: 'settings' } | { kind: 'playlist'; id: string };
 

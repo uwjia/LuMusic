@@ -1,10 +1,10 @@
 // Behavior tests for the playlist store (api layer is mocked).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../api';
-import type { Playlist, Track } from '../types/track';
-import { usePlaylistStore } from './playlistStore';
+import { api } from '@/api';
+import type { Playlist, Track } from '@/types/track';
+import { usePlaylistStore } from '@/stores/playlistStore';
 
-vi.mock('../api', () => ({
+vi.mock('@/api', () => ({
   api: {
     playlistList: vi.fn(),
     playlistGetTracks: vi.fn(),
@@ -113,5 +113,52 @@ describe('playlistStore', () => {
     await usePlaylistStore.getState().select('p1');
     await usePlaylistStore.getState().remove('p1');
     expect(usePlaylistStore.getState().selectedId).toBeNull();
+  });
+
+  it('duplicate creates a copy and replays the tracks in order', async () => {
+    usePlaylistStore.setState({ playlists: [chill] });
+    const copy = playlist('p2', 'Chill (copy)', ['a', 'b']);
+    vi.mocked(api.playlistCreate).mockResolvedValue(copy);
+    vi.mocked(api.playlistAddTrack).mockResolvedValue(true);
+    vi.mocked(api.playlistList).mockResolvedValue([chill, copy]);
+    const ok = await usePlaylistStore.getState().duplicate('p1');
+    expect(ok).toBe(true);
+    expect(api.playlistCreate).toHaveBeenCalledWith('Chill (copy)');
+    expect(api.playlistAddTrack).toHaveBeenNthCalledWith(1, 'p2', 'a');
+    expect(api.playlistAddTrack).toHaveBeenNthCalledWith(2, 'p2', 'b');
+    expect(usePlaylistStore.getState().playlists).toHaveLength(2);
+  });
+
+  it('duplicate picks the next free name when "(copy)" is taken', async () => {
+    usePlaylistStore.setState({ playlists: [chill, playlist('p2', 'Chill (copy)')] });
+    vi.mocked(api.playlistCreate).mockResolvedValue(playlist('p3', 'Chill (copy) 2'));
+    vi.mocked(api.playlistAddTrack).mockResolvedValue(true);
+    const ok = await usePlaylistStore.getState().duplicate('p1');
+    expect(ok).toBe(true);
+    expect(api.playlistCreate).toHaveBeenCalledWith('Chill (copy) 2');
+  });
+
+  it('duplicate keeps the source selected', async () => {
+    usePlaylistStore.setState({ playlists: [chill] });
+    vi.mocked(api.playlistCreate).mockResolvedValue(playlist('p2', 'Chill (copy)', ['a', 'b']));
+    vi.mocked(api.playlistAddTrack).mockResolvedValue(true);
+    await usePlaylistStore.getState().select('p1');
+    await usePlaylistStore.getState().duplicate('p1');
+    expect(usePlaylistStore.getState().selectedId).toBe('p1');
+  });
+
+  it('duplicate reports create failures without adding tracks', async () => {
+    usePlaylistStore.setState({ playlists: [chill] });
+    vi.mocked(api.playlistCreate).mockRejectedValue(new Error('invalid or duplicate playlist name'));
+    const ok = await usePlaylistStore.getState().duplicate('p1');
+    expect(ok).toBe(false);
+    expect(usePlaylistStore.getState().error).toContain('duplicate');
+    expect(api.playlistAddTrack).not.toHaveBeenCalled();
+  });
+
+  it('duplicate rejects an unknown playlist', async () => {
+    const ok = await usePlaylistStore.getState().duplicate('ghost');
+    expect(ok).toBe(false);
+    expect(usePlaylistStore.getState().error).toBe('playlist not found');
   });
 });

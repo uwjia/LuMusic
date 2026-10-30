@@ -1,10 +1,11 @@
 // Library page: search + track table + scan status.
 
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '../../components/ui/Button';
-import { useLibraryStore } from '../../stores/libraryStore';
-import { usePlayerStore } from '../../stores/playerStore';
-import { TrackTable } from './TrackTable';
+import { Button } from '@/components/ui/Button';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { useTranslation } from '@/i18n';
+import { TrackTable } from '@/features/library/TrackTable';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -19,6 +20,7 @@ export function LibraryPage({ onOpenSettings }: LibraryPageProps) {
   const scanProgress = useLibraryStore((s) => s.scanProgress);
   const { setSearch, toggleSort, load } = useLibraryStore.getState();
   const playerState = usePlayerStore((s) => s.state);
+  const { t } = useTranslation();
 
   const [term, setTerm] = useState(query.search ?? '');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,23 +36,29 @@ export function LibraryPage({ onOpenSettings }: LibraryPageProps) {
     };
   }, [term, setSearch]);
 
+  const trackCount =
+    tracks.length === 1
+      ? t('library.trackCountOne', { count: tracks.length })
+      : t('library.trackCount', { count: tracks.length });
+
   return (
     <section className="page" data-testid="library-page">
       <header className="page-header">
         <input
           type="search"
           className="search-input"
-          placeholder="Search title, artist, album…"
-          aria-label="Search tracks"
+          placeholder={t('library.searchPlaceholder')}
+          aria-label={t('library.searchLabel')}
           value={term}
           onChange={(e) => setTerm(e.target.value)}
           data-testid="search-input"
         />
         <span className="muted" data-testid="track-count">
-          {tracks.length} tracks{loading ? ' · loading…' : ''}
+          {trackCount}
+          {loading ? t('library.loadingSuffix') : ''}
         </span>
         <Button variant="primary" onClick={onOpenSettings}>
-          Manage library
+          {t('library.manage')}
         </Button>
       </header>
 
@@ -68,7 +76,10 @@ export function LibraryPage({ onOpenSettings }: LibraryPageProps) {
             />
           </div>
           <span className="muted">
-            Scanning… {scanProgress.scanned}/{scanProgress.total || '?'}
+            {t('library.scanning', {
+              scanned: scanProgress.scanned,
+              total: scanProgress.total || '?',
+            })}
           </span>
         </div>
       ) : null}
@@ -79,18 +90,16 @@ export function LibraryPage({ onOpenSettings }: LibraryPageProps) {
         sort={query.sort}
         descending={query.descending}
         onSort={(field) => void toggleSort(field)}
-        onPlay={(index) => void usePlayerStore.getState().load(tracks.map((t) => t.id), index)}
-        emptyTitle={query.search ? 'No matches' : 'Your library is empty'}
+        onPlay={(index) => void usePlayerStore.getState().load(tracks.map((tr) => tr.id), index)}
+        emptyTitle={query.search ? t('library.noMatches') : t('library.empty')}
         emptyHint={
-          query.search
-            ? 'Try different search terms.'
-            : 'Pick a music folder in Settings and scan it.'
+          query.search ? t('library.noMatchesHint') : t('library.emptyHint')
         }
       />
 
       {tracks.length === 0 && !query.search ? (
         <div className="page-footer">
-          <Button onClick={() => void load()}>Refresh</Button>
+          <Button onClick={() => void load()}>{t('library.refresh')}</Button>
         </div>
       ) : null}
     </section>

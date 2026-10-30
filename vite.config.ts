@@ -1,10 +1,18 @@
 /// <reference types="vitest/config" />
+import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    // `@/...` always points into src/, independent of the importing file's
+    // depth (mirrors the `paths` mapping in tsconfig.json).
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   // Tauri expects a fixed dev port; fail instead of silently picking another.
   server: {
     port: 1420,

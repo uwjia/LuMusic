@@ -12,3 +12,8 @@ src-tauri/gen/schemas/
 .idea/
 .DS_Store
 Thumbs.db
+
+# workspace
+.trae/
+.zcode/
+.lucode/

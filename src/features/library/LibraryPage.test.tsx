@@ -1,13 +1,13 @@
 // Behavior tests for the library page: debounced search + wiring.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { api } from '../../api';
-import type { Track } from '../../types/track';
-import { useLibraryStore } from '../../stores/libraryStore';
-import { usePlayerStore } from '../../stores/playerStore';
-import { LibraryPage } from './LibraryPage';
+import { api } from '@/api';
+import type { Track } from '@/types/track';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { LibraryPage } from '@/features/library/LibraryPage';
 
-vi.mock('../../api', () => ({
+vi.mock('@/api', () => ({
   api: {
     getTracks: vi.fn(),
     playerLoad: vi.fn(),
@@ -54,7 +54,7 @@ afterEach(() => {
 describe('LibraryPage', () => {
   it('renders the track count and rows', () => {
     render(<LibraryPage onOpenSettings={() => {}} />);
-    expect(screen.getByTestId('track-count')).toHaveTextContent('1 tracks');
+    expect(screen.getByTestId('track-count')).toHaveTextContent('1 track');
     expect(screen.getByText('Alpha Waves')).toBeInTheDocument();
   });
 

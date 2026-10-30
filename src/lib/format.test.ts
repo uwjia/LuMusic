@@ -1,6 +1,6 @@
 // Behavior tests for formatting helpers.
 import { describe, expect, it } from 'vitest';
-import { clamp, formatBytes, formatDuration } from './format';
+import { clamp, formatBytes, formatDuration } from '@/lib/format';
 
 describe('formatDuration', () => {
   it('renders minutes and zero-padded seconds', () => {

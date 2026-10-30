@@ -3,8 +3,8 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import type { WindowApi } from '../../api/window';
-import { TitleBar } from './TitleBar';
+import type { WindowApi } from '@/api/window';
+import { TitleBar } from '@/features/shell/TitleBar';
 
 function fakeApi(overrides: Partial<WindowApi> = {}): WindowApi {
   return {

@@ -11,7 +11,7 @@ import type {
   Track,
   TrackId,
   TrackQuery,
-} from '../types/track';
+} from '@/types/track';
 
 export type Unsubscribe = () => void;
 

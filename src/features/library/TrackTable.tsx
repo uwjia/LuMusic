@@ -3,8 +3,9 @@
 
 import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { formatDuration } from '../../lib/format';
-import type { SortField, Track } from '../../types/track';
+import { formatDuration } from '@/lib/format';
+import { useTranslation } from '@/i18n';
+import type { SortField, Track } from '@/types/track';
 
 export const ROW_HEIGHT = 36;
 
@@ -22,12 +23,15 @@ interface TrackTableProps {
   emptyHint?: string;
 }
 
-const COLUMNS: { key: SortField | 'index' | 'duration'; label: string; className: string }[] = [
-  { key: 'index', label: '#', className: 'col-index' },
-  { key: 'title', label: 'Title', className: 'col-title' },
-  { key: 'artist', label: 'Artist', className: 'col-artist' },
-  { key: 'album', label: 'Album', className: 'col-album' },
-  { key: 'duration', label: 'Time', className: 'col-duration' },
+type ColumnKey = SortField | 'index' | 'duration';
+
+/** Column layout (order + grid class); labels come from the i18n catalogue. */
+const COLUMNS: { key: ColumnKey; labelKey: 'table.index' | 'table.title' | 'table.artist' | 'table.album' | 'table.duration'; className: string }[] = [
+  { key: 'index', labelKey: 'table.index', className: 'col-index' },
+  { key: 'title', labelKey: 'table.title', className: 'col-title' },
+  { key: 'artist', labelKey: 'table.artist', className: 'col-artist' },
+  { key: 'album', labelKey: 'table.album', className: 'col-album' },
+  { key: 'duration', labelKey: 'table.duration', className: 'col-duration' },
 ];
 
 export function TrackTable({
@@ -38,10 +42,11 @@ export function TrackTable({
   onSort,
   onPlay,
   rowAction,
-  emptyTitle = 'No tracks yet',
-  emptyHint = 'Scan a music folder to fill your library.',
+  emptyTitle,
+  emptyHint,
 }: TrackTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation();
   const virtualizer = useVirtualizer({
     count: tracks.length,
     getScrollElement: () => parentRef.current,
@@ -54,14 +59,14 @@ export function TrackTable({
   if (tracks.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-state-title">{emptyTitle}</div>
-        <div className="empty-state-hint">{emptyHint}</div>
+        <div className="empty-state-title">{emptyTitle ?? t('table.emptyTitle')}</div>
+        <div className="empty-state-hint">{emptyHint ?? t('table.emptyHint')}</div>
       </div>
     );
   }
 
   return (
-    <div className="track-table" role="grid" aria-label="Tracks">
+    <div className="track-table" role="grid" aria-label={t('table.tracks')}>
       <div className="track-header" role="row">
         {COLUMNS.map((col) => {
           const sortable = col.key === 'title' || col.key === 'artist' || col.key === 'album';
@@ -76,7 +81,7 @@ export function TrackTable({
               aria-sort={active ? (descending ? 'descending' : 'ascending') : 'none'}
               onClick={() => sortable && onSort(col.key as SortField)}
             >
-              {col.label}
+              {t(col.labelKey)}
               {active ? (descending ? ' ↓' : ' ↑') : ''}
             </button>
           );
@@ -106,7 +111,7 @@ export function TrackTable({
                 data-testid={`track-row-${row.index}`}
               >
                 <span className={`cell ${COLUMNS[0].className}`}>
-                  {isCurrent ? <span className="playing-dot" aria-label="playing" /> : row.index + 1}
+                  {isCurrent ? <span className="playing-dot" aria-label={t('table.playing')} /> : row.index + 1}
                 </span>
                 <span className={`cell ${COLUMNS[1].className}`} title={track.title}>
                   {track.title}

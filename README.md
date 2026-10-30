@@ -7,6 +7,9 @@ strictly layered architecture and tests accompanying every behavior.
 
 - Custom frameless title bar that matches the app theme (drag region,
   minimize / maximize / close; native controls are disabled in `tauri.conf.json`)
+- UI internationalization: English / 简体中文 — detected from the OS language,
+  switchable in Settings (`src/i18n/`, dictionary key parity enforced by types),
+  choice persisted in localStorage
 - Scan a music folder and build a searchable, sortable library (MP3 / FLAC / WAV / OGG)
 - Automatic mojibake repair: legacy GBK/Big5/Shift-JIS tags misread as Latin-1
   (e.g. `ÄãºÃ` -> `你好`) are fixed with a high-confidence heuristic
@@ -27,6 +30,7 @@ Dependencies point strictly downwards; each layer is testable in isolation.
 ```text
 ┌─ Frontend (src/) ──────────────────────────────────────────────┐
 │ features/   UI modules (library, player, playlists, settings)  │
+│ i18n/       locale store + en / zh-CN message catalogues       │
 │ stores/     zustand stores - all backend calls go through api/ │
 │ api/        PlayerApi interface + tauri impl + mock impl       │
 │ types/      DTOs mirroring Rust serde types                    │
@@ -87,7 +91,7 @@ npm run test        # frontend unit/component tests (vitest)
 npm run test:rust   # backend unit tests (cargo test)
 ```
 
-Current coverage: **84 backend** + **65 frontend** tests. The working rule for
+Current coverage: **90 backend** + **110 frontend** tests. The working rule for
 this repo: any behavior change ships with a test that pins it.
 
 | Layer                 | Test style                                                   |

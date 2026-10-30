@@ -1,8 +1,8 @@
 // Library store: track list, search/sort query, scan lifecycle.
 
 import { create } from 'zustand';
-import { api } from '../api';
-import type { ScanProgress, ScanSummary, SortField, Track, TrackQuery } from '../types/track';
+import { api } from '@/api';
+import type { ScanProgress, ScanSummary, SortField, Track, TrackQuery } from '@/types/track';
 
 export const DEFAULT_QUERY: TrackQuery = {
   search: null,

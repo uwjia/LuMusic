@@ -1,10 +1,10 @@
 // Behavior tests for the library store (api layer is mocked).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../api';
-import type { ScanSummary, Track } from '../types/track';
-import { DEFAULT_QUERY, useLibraryStore } from './libraryStore';
+import { api } from '@/api';
+import type { ScanSummary, Track } from '@/types/track';
+import { DEFAULT_QUERY, useLibraryStore } from '@/stores/libraryStore';
 
-vi.mock('../api', () => ({
+vi.mock('@/api', () => ({
   api: {
     getTracks: vi.fn(),
     scanLibrary: vi.fn(),

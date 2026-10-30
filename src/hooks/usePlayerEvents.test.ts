@@ -1,15 +1,15 @@
 // Behavior tests for the event bridge hook.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
-import { api } from '../api';
-import { useLibraryStore } from '../stores/libraryStore';
-import { usePlayerStore } from '../stores/playerStore';
-import { usePlayerEvents } from './usePlayerEvents';
+import { api } from '@/api';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { usePlayerStore } from '@/stores/playerStore';
+import { usePlayerEvents } from '@/hooks/usePlayerEvents';
 
 type Handler = (payload: unknown) => void;
 const handlers = new Map<string, Handler>();
 
-vi.mock('../api', () => ({
+vi.mock('@/api', () => ({
   api: {
     onPlayerState: vi.fn((cb: Handler) => {
       handlers.set('state', cb);

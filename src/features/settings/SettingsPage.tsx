@@ -1,16 +1,18 @@
-// Settings page: music folder picker + scan + about info.
+// Settings page: language switch, music folder picker + scan, about info.
 
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { api } from '../../api';
-import { Button } from '../../components/ui/Button';
-import { useLibraryStore } from '../../stores/libraryStore';
+import { api } from '@/api';
+import { Button } from '@/components/ui/Button';
+import { LOCALES, LOCALE_NAMES, useTranslation } from '@/i18n';
+import { useLibraryStore } from '@/stores/libraryStore';
 
 export function SettingsPage() {
   const lastScan = useLibraryStore((s) => s.lastScan);
   const scanProgress = useLibraryStore((s) => s.scanProgress);
   const error = useLibraryStore((s) => s.error);
   const scan = useLibraryStore((s) => s.scan);
+  const { locale, setLocale, t } = useTranslation();
 
   const [folder, setFolder] = useState<string>('');
   const [version, setVersion] = useState('');
@@ -34,24 +36,39 @@ export function SettingsPage() {
 
   return (
     <section className="page" data-testid="settings-page">
-      <h2>Library</h2>
+      <h2>{t('settings.language')}</h2>
+      <div className="settings-row language-switch" role="group" aria-label={t('settings.language')}>
+        {LOCALES.map((l) => (
+          <Button
+            key={l}
+            variant={l === locale ? 'primary' : 'ghost'}
+            aria-pressed={l === locale}
+            onClick={() => setLocale(l)}
+            data-testid={`locale-${l}`}
+          >
+            {LOCALE_NAMES[l]}
+          </Button>
+        ))}
+      </div>
+
+      <h2>{t('settings.library')}</h2>
       <div className="settings-row">
         <input
           type="text"
           className="folder-input"
-          aria-label="Music folder"
+          aria-label={t('settings.musicFolder')}
           value={folder}
           placeholder="C:\Users\me\Music"
           onChange={(e) => setFolder(e.target.value)}
         />
-        <Button onClick={() => void pickFolder()}>Browse…</Button>
+        <Button onClick={() => void pickFolder()}>{t('settings.browse')}</Button>
         <Button
           variant="primary"
           disabled={!folder.trim() || busy}
           onClick={() => void scan(folder.trim())}
           data-testid="scan-button"
         >
-          {busy ? 'Scanning…' : 'Scan folder'}
+          {busy ? t('settings.scanning') : t('settings.scanFolder')}
         </Button>
       </div>
 
@@ -79,9 +96,14 @@ export function SettingsPage() {
 
       {lastScan ? (
         <div className="scan-summary" data-testid="scan-summary">
-          Last scan of <code>{lastScan.root}</code>: {lastScan.filesSeen} files ·{' '}
-          {lastScan.added} added · {lastScan.updated} updated · {lastScan.removed} removed ·{' '}
-          {lastScan.skipped} skipped
+          {t('settings.lastScan', {
+            root: lastScan.root,
+            filesSeen: lastScan.filesSeen,
+            added: lastScan.added,
+            updated: lastScan.updated,
+            removed: lastScan.removed,
+            skipped: lastScan.skipped,
+          })}
           {lastScan.warnings.length > 0 ? (
             <ul className="scan-warnings">
               {lastScan.warnings.slice(0, 5).map((w) => (
@@ -92,12 +114,9 @@ export function SettingsPage() {
         </div>
       ) : null}
 
-      <h2>About</h2>
+      <h2>{t('settings.about')}</h2>
       <p className="muted">{version || '…'}</p>
-      <p className="muted">
-        Supported formats: MP3, FLAC, WAV, OGG. Settings and the library cache live in the
-        app data directory.
-      </p>
+      <p className="muted">{t('settings.aboutText')}</p>
     </section>
   );
 }

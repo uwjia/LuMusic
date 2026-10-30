@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { EventCallback } from '@tauri-apps/api/event';
 
-import type { PlayerApi, Unsubscribe } from './types';
+import type { PlayerApi, Unsubscribe } from '@/api/types';
 import {
   LIBRARY_SCAN_PROGRESS_EVENT,
   LIBRARY_UPDATED_EVENT,
@@ -14,7 +14,7 @@ import {
   type ScanProgress,
   type ScanSummary,
   type Track,
-} from '../types/track';
+} from '@/types/track';
 
 function wire<T>(event: string, cb: (payload: T) => void): Unsubscribe {
   // `listen` returns a promise with an unlisten fn; bridge to sync API shape.
