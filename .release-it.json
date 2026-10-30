@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/release-it/schema/release-it.json",
+  "hooks": {
+    "after:bump": "node scripts/sync-versions.mjs"
+  },
+  "git": {
+    "commitMessage": "chore(release): bump version to ${version}",
+    "tagName": "v${version}"
+  },
+  "npm": {
+    "publish": false
+  },
+  "github": {
+    "release": false
+  }
+}

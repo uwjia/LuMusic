@@ -1,0 +1,116 @@
+# Windows desktop packaging pipeline for LuMusic (Tauri 2). Local
+# counterpart: `npm run tauri build` — this workflow produces the same
+# bundles on a clean runner:
+#   npm ci → npm run tauri build
+#     → src-tauri/target/release/bundle/nsis/LuMusic-<ver>-x64-setup.exe
+#     → src-tauri/target/release/bundle/msi/LuMusic-<ver>-x64_en-US.msi
+#
+# Triggers: manual (workflow_dispatch) or version tags (v*). Regular
+# pushes would burn ~10 runner-minutes of Rust release build per commit
+# and belong to quality gates (`npm run check`) run locally instead.
+#
+# tauri build invokes `beforeBuildCommand` (npm run build → vite) itself,
+# so there is no separate frontend-build step here.
+
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  # contents:write is needed to create the GitHub Release on tag pushes.
+  contents: write
+
+jobs:
+  package-windows:
+    name: package (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      # Full history + tags: the release-notes step walks the commit
+      # range between the previous v* tag and this one.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Runner images ship Rust, but pinning the toolchain keeps builds
+      # reproducible instead of drifting with image updates.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # Tauri's Rust release build is the expensive part (~8 min cached,
+      # much more cold); cache cargo registry + src-tauri/target keyed on
+      # Cargo.lock so only changed crates recompile.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Cache the bundler toolchains Tauri downloads on first run (NSIS,
+      # WixTools, WebView2 setup) — they land in %LOCALAPPDATA%\tauri.
+      - uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-toolchain-${{ runner.os }}-v1
+          restore-keys: tauri-toolchain-${{ runner.os }}-
+
+      - run: npm ci
+
+      - run: npm run tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuMusic-bundles-windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+      # Publish a real GitHub Release (Releases page, public download URL)
+      # on tag pushes. Manual dispatches only produce the artifact above —
+      # there is no tag to attach a release to. gh is preinstalled on the
+      # runner and expands the glob itself. GitHub's --generate-notes only
+      # summarizes merged PRs, and this repo pushes directly to main — so
+      # the notes are generated here from the conventional commits between
+      # the previous v* tag and this one.
+      - name: Generate release notes from conventional commits
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PREV=$(git describe --tags --match 'v*' --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          RANGE="${PREV:+$PREV..}${TAG}"
+          echo "notes range: ${RANGE}"
+          log() { git log --no-merges --pretty=format:'- %s (%h)' "${RANGE}"; }
+          {
+            echo "## What's Changed"
+            echo ""
+            FEAT=$(log | grep -E '^- feat(\([^)]*\))?:' || true)
+            FIX=$(log | grep -E '^- fix(\([^)]*\))?:' || true)
+            OTHER=$(log | grep -vE '^- (feat|fix|chore\(release\))(\([^)]*\))?:' || true)
+            if [ -n "${FEAT}" ]; then echo "### Features"; echo "${FEAT}"; echo ""; fi
+            if [ -n "${FIX}" ]; then echo "### Fixes"; echo "${FIX}"; echo ""; fi
+            if [ -n "${OTHER}" ]; then echo "### Others"; echo "${OTHER}"; echo ""; fi
+            if [ -n "${PREV}" ]; then
+              echo "**Full Changelog**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
+            fi
+          } > release-notes.md
+
+      - name: Create GitHub Release with the bundles
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          )
+          gh release create "${{ github.ref_name }}" --notes-file release-notes.md "${files[@]}"
