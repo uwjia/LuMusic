@@ -172,7 +172,7 @@ class MockApi implements PlayerApi {
     return this.snapshot();
   }
 
-  async playerLoad(ids, startIndex) {
+  async playerLoad(ids: string[], startIndex?: number) {
     this.queue = ids
       .map((id) => this.tracks.find((t) => t.id === id))
       .filter((t): t is Track => Boolean(t));
@@ -315,10 +315,10 @@ class MockApi implements PlayerApi {
   }
 
   async playlistGetTracks(id: string) {
-    const playlist = this.playlists.find((p) => p.id === id);
+    const playlist = this.playlists.find((p: Playlist) => p.id === id);
     if (!playlist) throw new Error('playlist not found');
     return playlist.items
-      .map((t) => this.tracks.find((track) => track.id === t))
+      .map((t: string) => this.tracks.find((track: Track) => track.id === t))
       .filter((t): t is Track => Boolean(t));
   }
 
