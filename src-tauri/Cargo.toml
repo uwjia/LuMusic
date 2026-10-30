@@ -1,6 +1,6 @@
 [package]
 name = "lumusic"
-version = "0.1.0"
+version = "0.1.1"
 description = "LuMusic - a local music player built with Tauri + React"
 edition = "2021"
 
