@@ -6,6 +6,7 @@ use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::Tag;
 
+use crate::domain::encoding::fix_mojibake;
 use crate::domain::track::Track;
 
 /// Errors while reading one file's metadata.
@@ -40,7 +41,9 @@ impl MetadataReader for LoftyMetadataReader {
 /// Pure mapping from a lofty tag into our `Track` model.
 ///
 /// Missing fields degrade to `None`; the title falls back to the file stem
-/// when the tag has no title or an empty one.
+/// when the tag has no title or an empty one. Text fields run through
+/// `fix_mojibake` because legacy taggers stored GBK/Big5 bytes declared as
+/// Latin-1, which tag readers surface as mojibake.
 pub fn map_tag(path: &Path, size_bytes: u64, tag: Option<&Tag>, duration_secs: f64) -> Track {
     let mut track = Track::from_stem(path, size_bytes);
     track.duration_secs = if duration_secs.is_finite() && duration_secs > 0.0 {
@@ -52,24 +55,30 @@ pub fn map_tag(path: &Path, size_bytes: u64, tag: Option<&Tag>, duration_secs: f
         return track;
     };
 
+    // Repair first, trim second: mojibake bytes never carry meaningful spaces.
     if let Some(title) = tag.title() {
-        let title = title.trim().to_string();
+        let title = fix_mojibake(title.trim());
         if !title.is_empty() {
             track.title = title;
         }
     }
-    track.artist = tag.artist().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-    track.album = tag.album().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let clean = |value: Option<std::borrow::Cow<'_, str>>| {
+        value
+            .map(|v| fix_mojibake(v.trim()))
+            .filter(|v| !v.is_empty())
+    };
+    track.artist = clean(tag.artist());
+    track.album = clean(tag.album());
     // AlbumArtist has no dedicated accessor; read the raw item instead.
-    track.album_artist = tag
-        .get(&ItemKey::AlbumArtist)
-        .and_then(|item| item.value().text())
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty());
+    track.album_artist = clean(
+        tag.get(&ItemKey::AlbumArtist)
+            .and_then(|item| item.value().text())
+            .map(std::borrow::Cow::Borrowed),
+    );
     track.track_no = tag.track();
     track.disc_no = tag.disk();
     track.year = tag.year();
-    track.genre = tag.genre().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    track.genre = clean(tag.genre());
     track
 }
 
@@ -127,6 +136,35 @@ mod tests {
             10.0,
         );
         assert_eq!(track.title, "stem");
+    }
+
+    #[test]
+    fn map_tag_repairs_mojibake_text_fields() {
+        // "晴天" and "周杰伦" encoded as GBK, then misread as Latin-1 -
+        // exactly what an ID3v2.3 tag written by legacy CN taggers yields.
+        let gbk = |text: &str| {
+            let (bytes, _, _) = encoding_rs::GBK.encode(text);
+            bytes.iter().map(|b| *b as char).collect::<String>()
+        };
+        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
+        tag.set_title(gbk("晴天"));
+        tag.set_artist(gbk("周杰伦"));
+        tag.set_album(gbk("叶惠美"));
+
+        let track = map_tag(Path::new("C:/m/song.mp3"), 1, Some(&tag), 10.0);
+        assert_eq!(track.title, "晴天");
+        assert_eq!(track.artist.as_deref(), Some("周杰伦"));
+        assert_eq!(track.album.as_deref(), Some("叶惠美"));
+    }
+
+    #[test]
+    fn map_tag_keeps_well_encoded_western_tags() {
+        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
+        tag.set_title("Café Del Mar".to_string());
+        tag.set_artist("Björk".to_string());
+        let track = map_tag(Path::new("C:/m/song.mp3"), 1, Some(&tag), 10.0);
+        assert_eq!(track.title, "Café Del Mar");
+        assert_eq!(track.artist.as_deref(), Some("Björk"));
     }
 
     #[test]

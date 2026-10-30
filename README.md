@@ -6,6 +6,9 @@ strictly layered architecture and tests accompanying every behavior.
 ## Features
 
 - Scan a music folder and build a searchable, sortable library (MP3 / FLAC / WAV / OGG)
+- Automatic mojibake repair: legacy GBK/Big5/Shift-JIS tags misread as Latin-1
+  (e.g. `ÄãºÃ` -> `你好`) are fixed with a high-confidence heuristic
+  (`domain/encoding.rs`, Western titles are never rewritten)
 - Play / pause / seek / volume, shuffle, repeat (off / all / one) with auto-advance
 - Playlists: create, rename, delete, add/remove/reorder tracks
 - State persisted across restarts (library cache, playlists, volume, last folder)

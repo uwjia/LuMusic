@@ -3,6 +3,7 @@
 //! Everything in this module must be deterministically unit-testable; adapters
 //! live in `crate::infra` and orchestration in `crate::app`.
 
+pub mod encoding;
 pub mod library;
 pub mod playlist;
 pub mod queue;
