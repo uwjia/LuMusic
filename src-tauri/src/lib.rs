@@ -69,6 +69,21 @@ pub fn run() {
             let service = app::state::build(&data_dir).expect("service builds");
             app.manage(service);
 
+            // Window geometry: restore while the window is still hidden
+            // (`visible: false` in tauri.conf.json) so the configured
+            // 1100x720 never flashes; the tracker is seeded with the
+            // applied geometry and kept fresh by the window events below.
+            let window = app
+                .get_webview_window("main")
+                .expect("main window is configured");
+            let window_persistence: std::sync::Arc<dyn infra::persistence::Persistence> =
+                std::sync::Arc::new(infra::persistence::JsonPersistence::new(&data_dir));
+            app::window_state::restore(&window, window_persistence.as_ref());
+            let saver = app::window_state::WindowStateSaver::start(window_persistence);
+            saver.record(&window);
+            app.manage(saver);
+            let _ = window.show();
+
             let poller_service = app.state::<SharedService>().inner().clone();
 
             // Tray: seeded from the restored session so the menu is correct
@@ -95,23 +110,36 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Last-chance flush on quit: the periodic poller save may be
-                // up to SESSION_SAVE_INTERVAL stale at this point.
-                let close_to_tray = {
-                    let service = window.state::<SharedService>();
-                    let Ok(mut guard) = service.lock() else {
-                        return;
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Last-chance flush on quit: the periodic poller save may be
+                    // up to SESSION_SAVE_INTERVAL stale at this point.
+                    let close_to_tray = {
+                        let service = window.state::<SharedService>();
+                        let Ok(mut guard) = service.lock() else {
+                            return;
+                        };
+                        guard.save_playback_session();
+                        guard.settings().close_to_tray
                     };
-                    guard.save_playback_session();
-                    guard.settings().close_to_tray
-                };
-                if close_to_tray {
-                    // Hide to the tray instead of exiting: playback keeps
-                    // running and the tray restores the window.
-                    api.prevent_close();
-                    let _ = window.hide();
+                    if close_to_tray {
+                        // Hide to the tray instead of exiting: playback keeps
+                        // running and the tray restores the window.
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
+                // Interactive resizing emits these continuously; the saver
+                // coalesces them into one debounced disk write.
+                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                    if let (Some(saver), Some(main)) = (
+                        window.try_state::<app::window_state::WindowStateSaver>(),
+                        window.app_handle().get_webview_window("main"),
+                    ) {
+                        saver.record(&main);
+                    }
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())
@@ -135,7 +163,10 @@ pub fn run() {
                 }
             }
             // Final flush for every exit path (quit from tray, plain exit).
-            tauri::RunEvent::Exit => tray::flush_session(app),
+            tauri::RunEvent::Exit => {
+                tray::flush_session(app);
+                app::window_state::flush(app);
+            }
             _ => {}
         });
 }

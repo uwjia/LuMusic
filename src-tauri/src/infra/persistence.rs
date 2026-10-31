@@ -9,6 +9,7 @@ use crate::domain::library::LibraryIndex;
 use crate::domain::playlist::PlaylistCollection;
 use crate::domain::session::PlaybackSession;
 use crate::domain::settings::Settings;
+use crate::domain::window::WindowGeometry;
 
 /// Errors produced by the persistence layer.
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +35,9 @@ pub trait Persistence: Send + Sync {
     fn save_playlists(&self, playlists: &PlaylistCollection) -> Result<(), PersistenceError>;
     fn load_settings(&self) -> Result<Settings, PersistenceError>;
     fn save_settings(&self, settings: &Settings) -> Result<(), PersistenceError>;
+    /// Last window geometry; `Ok(None)` on a first launch.
+    fn load_window(&self) -> Result<Option<WindowGeometry>, PersistenceError>;
+    fn save_window(&self, geometry: &WindowGeometry) -> Result<(), PersistenceError>;
     fn load_playback(&self) -> Result<Option<PlaybackSession>, PersistenceError>;
     fn save_playback(&self, session: &PlaybackSession) -> Result<(), PersistenceError>;
     /// Removes the persisted session; used when playback ends for good so
@@ -108,6 +112,14 @@ impl Persistence for JsonPersistence {
         self.write_json("settings.json", settings)
     }
 
+    fn load_window(&self) -> Result<Option<WindowGeometry>, PersistenceError> {
+        self.read_json("window.json")
+    }
+
+    fn save_window(&self, geometry: &WindowGeometry) -> Result<(), PersistenceError> {
+        self.write_json("window.json", geometry)
+    }
+
     fn load_playback(&self) -> Result<Option<PlaybackSession>, PersistenceError> {
         self.read_json("playback.json")
     }
@@ -167,6 +179,21 @@ mod tests {
             ..Settings::default()
         };
         store.save_settings(&settings).unwrap();
+        assert_eq!(store.load_settings().unwrap(), settings);
+
+        // Window geometry: absent until the first save, then round-trips.
+        assert_eq!(store.load_window().unwrap(), None);
+        let geometry = crate::domain::window::WindowGeometry {
+            x: -1920,
+            y: 40,
+            width: 960,
+            height: 600,
+            maximized: true,
+        };
+        store.save_window(&geometry).unwrap();
+        assert_eq!(store.load_window().unwrap(), Some(geometry));
+        // Settings and window writes are separate files: saving one must
+        // not clobber the other.
         assert_eq!(store.load_settings().unwrap(), settings);
 
         assert_eq!(store.load_playback().unwrap(), None);
