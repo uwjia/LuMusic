@@ -57,13 +57,32 @@ impl Default for TrayLabels {
     }
 }
 
+/// Cap for the now-playing text. Native menus size themselves to the
+/// widest item and track titles come from file name stems (frequently very
+/// long), so one long title would stretch the whole menu across the
+/// screen. The same bound keeps the hover tooltip compact.
+const MAX_TRACK_LABEL_CHARS: usize = 10;
+
 /// `Title — Artist` (artist omitted when unknown); shared by the menu entry
 /// and the tooltip.
 fn track_display(track: &Track) -> String {
-    match track.artist.as_deref() {
+    let full = match track.artist.as_deref() {
         Some(artist) if !artist.is_empty() => format!("{} — {}", track.title, artist),
         _ => track.title.clone(),
+    };
+    clamp_label(&full, MAX_TRACK_LABEL_CHARS)
+}
+
+/// Clamps to `max` characters, marking the cut with an ellipsis. Counts
+/// `char`s (not bytes) so CJK titles truncate on a character boundary
+/// instead of mid-codepoint.
+fn clamp_label(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
     }
+    let mut clamped: String = text.chars().take(max.saturating_sub(1)).collect();
+    clamped.push('…');
+    clamped
 }
 
 /// The play/pause entry offers the *opposite* of the current status.
@@ -349,5 +368,38 @@ mod tests {
         assert_eq!(parsed.play, "播放");
         assert_eq!(parsed.nothing_playing, "暂无播放");
         assert_eq!(parsed.quit, "Quit");
+    }
+
+    #[test]
+    fn long_track_labels_are_clamped_for_menu_and_tooltip() {
+        // A file-stem title far beyond the cap must not stretch the native
+        // menu: exactly MAX chars, cut marked with an ellipsis.
+        let mut long = track(None);
+        long.title = "A".repeat(120);
+        let label = now_playing_label(&TrayLabels::default(), &state(PlaybackStatus::Playing, Some(long)));
+        assert_eq!(label.chars().count(), MAX_TRACK_LABEL_CHARS);
+        assert!(label.ends_with('…'));
+
+        // The tooltip adds a status glyph, so the label part stays capped.
+        let mut long = track(None);
+        long.title = "A".repeat(120);
+        let tip = tooltip_text(&state(PlaybackStatus::Playing, Some(long)));
+        assert!(tip.starts_with("▶ "));
+        assert_eq!(tip.chars().count(), MAX_TRACK_LABEL_CHARS + 2);
+    }
+
+    #[test]
+    fn clamp_label_truncates_cjk_on_character_boundaries() {
+        // Byte-based slicing would split a multi-byte char and panic.
+        let cjk = "夜".repeat(60);
+        let clamped = clamp_label(&cjk, MAX_TRACK_LABEL_CHARS);
+        assert_eq!(clamped.chars().count(), MAX_TRACK_LABEL_CHARS);
+        assert!(clamped.ends_with('…'));
+        assert!(cjk.starts_with(clamped.trim_end_matches('…')));
+
+        // Short and exactly-at-cap strings pass through untouched.
+        assert_eq!(clamp_label("Alpha", MAX_TRACK_LABEL_CHARS), "Alpha");
+        let exact: String = "b".repeat(MAX_TRACK_LABEL_CHARS);
+        assert_eq!(clamp_label(&exact, MAX_TRACK_LABEL_CHARS), exact);
     }
 }
