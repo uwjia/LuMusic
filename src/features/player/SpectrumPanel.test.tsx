@@ -1,14 +1,13 @@
 // Behavior tests for the spectrum popover: subscription lifecycle, canvas
-// presence, the live/idle status text and the pinned "stays open" rule
-// (painting itself is untestable in jsdom; the data flow through the store
-// is what matters).
+// presence, the text-free chrome (bars only; the dialog keeps its
+// accessible name) and the pinned "stays open" rule (painting itself is
+// untestable in jsdom; the data flow through the store is what matters).
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { api } from '@/api';
 import type { SpectrumFrame } from '@/types/track';
 import { SPECTRUM_BARS } from '@/types/track';
-import type { PlayerState } from '@/types/track';
 import { usePlayerStore } from '@/stores/playerStore';
 import { SILENT_FRAME, useSpectrumStore } from '@/stores/spectrumStore';
 import { SpectrumPanel } from '@/features/player/SpectrumPanel';
@@ -26,18 +25,6 @@ vi.mock('@/api', () => ({
     }),
   },
 }));
-
-const state = (status: PlayerState['status']): PlayerState => ({
-  status,
-  currentTrack: null,
-  queuePosition: null,
-  queueLen: 0,
-  positionSecs: 0,
-  durationSecs: null,
-  volume: 0.5,
-  shuffle: false,
-  repeat: 'off',
-});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -62,14 +49,16 @@ describe('SpectrumPanel', () => {
     expect(useSpectrumStore.getState().frame.every((bar) => bar === 0.7)).toBe(true);
   });
 
-  it('shows the idle label when nothing plays and live while playing', async () => {
-    usePlayerStore.setState({ state: state('paused') });
-    const { rerender } = render(<SpectrumPanel />);
-    expect(await screen.findByTestId('spectrum-status')).toHaveTextContent('Idle');
-
-    usePlayerStore.setState({ state: state('playing') });
-    rerender(<SpectrumPanel />);
-    expect(screen.getByTestId('spectrum-status')).toHaveTextContent('Live');
+  it('renders no visible title or status text — bars only, named for a11y', async () => {
+    render(<SpectrumPanel />);
+    const panel = await screen.findByTestId('spectrum-panel');
+    // No heading, no live/idle hint: the centered overlay is pure
+    // visualization and must not put text over the page beneath it.
+    expect(panel.textContent).toBe('');
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('spectrum-status')).not.toBeInTheDocument();
+    // Screen readers still get an accessible name for the dialog.
+    expect(screen.getByRole('dialog', { name: 'Spectrum' })).toBeInTheDocument();
   });
 
   it('stays open on outside presses and Escape (only the player-bar button closes it)', async () => {

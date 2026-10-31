@@ -1,13 +1,14 @@
 // App shell wiring tests (api mocked at the seam; stores seeded via setState).
 // Pins the interaction between sidebar navigation and the lyrics page.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { api } from '@/api';
 import type { PlayerState, Playlist, Track } from '@/types/track';
 import App from '@/App';
 import { useLyricsStore } from '@/stores/lyricsStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
+import { SILENT_FRAME, useSpectrumStore } from '@/stores/spectrumStore';
 
 vi.mock('@/api', () => {
   const unsubscribe = () => () => {};
@@ -20,6 +21,7 @@ vi.mock('@/api', () => {
       playlistGetTracks: vi.fn(async () => [] as Track[]),
       lyricsGet: vi.fn(),
       traySetLabels: vi.fn(async () => undefined),
+      onSpectrum: vi.fn(unsubscribe),
       onPlayerState: vi.fn(unsubscribe),
       onProgress: vi.fn(unsubscribe),
       onScanProgress: vi.fn(unsubscribe),
@@ -70,6 +72,7 @@ beforeEach(() => {
   });
   usePlayerStore.setState({ state: playing, error: null });
   usePlaylistStore.setState({ playlists, selectedTracks: [], selectedId: null, error: null });
+  useSpectrumStore.setState({ open: false, frame: [...SILENT_FRAME] });
   useLyricsStore.setState({
     open: true,
     trackId: null,
@@ -77,6 +80,23 @@ beforeEach(() => {
     sourcePath: null,
     status: 'idle',
     error: null,
+  });
+});
+
+describe('App spectrum overlay', () => {
+  it('mounts the panel inside the content area, not the player bar', () => {
+    useSpectrumStore.setState({ open: true });
+    const { container } = render(<App />);
+    // Anchored to .content so it centers on the page's visual center
+    // (sidebar excluded); the player bar must not own the overlay.
+    expect(container.querySelector('.content .spectrum-panel')).toBeInTheDocument();
+    expect(container.querySelector('.player-bar .spectrum-panel')).not.toBeInTheDocument();
+
+    // The toggle's contract (store flag) drives mounting both ways.
+    act(() => {
+      useSpectrumStore.getState().setOpen(false);
+    });
+    expect(container.querySelector('.content .spectrum-panel')).not.toBeInTheDocument();
   });
 });
 

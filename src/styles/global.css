@@ -298,6 +298,10 @@ button {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  /* Anchor for the spectrum overlay: it centers on the content area,
+     whose center is the page's visual center (a window-anchored panel
+     would sit half a sidebar-width left of every page's column). */
+  position: relative;
 }
 
 /* ---------- scrollbars (reveal on hover) ---------- */
@@ -1209,38 +1213,24 @@ button {
 
 /* ---------- spectrum panel ---------- */
 
-/* Same popover geometry as the EQ panel (both anchor to the bar's right
-   edge and are mutually exclusive). */
+/* Bottom-center overlay of the content area: it must share the page's
+   visual center (sidebar excluded), so it lives inside .content (its
+   relative parent) instead of the player bar. Chromeless and
+   click-through on purpose — no background/border/shadow and no pointer
+   events, so only the bars render and the page underneath (clickable
+   lyric lines included) stays fully visible and interactive. */
 .spectrum-panel {
   position: absolute;
-  right: 16px;
-  bottom: calc(100% + 10px);
+  left: 50%;
+  /* Flush with the content's bottom edge (the player bar's top border):
+     bars grow straight up out of the bar, no gap, no axis strip. */
+  bottom: 0;
+  transform: translateX(-50%);
   z-index: 900;
   width: min(540px, calc(100vw - 32px));
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--bg-3);
-  border-radius: calc(var(--radius) + 4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-.spectrum-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.spectrum-head h3 {
-  flex: 1;
-  margin: 0;
-  font-size: 14px;
-}
-
-.spectrum-hint {
-  font-size: 12px;
+  pointer-events: none;
 }
 
 .spectrum-canvas {

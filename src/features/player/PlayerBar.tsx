@@ -16,7 +16,6 @@ import { LyricsIcon } from '@/features/lyrics/LyricsIcons';
 import { EqualizerIcon } from '@/features/player/EqualizerIcons';
 import { EqualizerPanel } from '@/features/player/EqualizerPanel';
 import { SpectrumIcon } from '@/features/player/SpectrumIcons';
-import { SpectrumPanel } from '@/features/player/SpectrumPanel';
 import { ArtEffectIcon } from '@/features/player/ArtEffectIcons';
 import { ArtEffectsPanel } from '@/features/player/ArtEffectsPanel';
 import { VolumeControl } from '@/features/player/VolumeControl';
@@ -83,7 +82,8 @@ export function PlayerBar() {
       </div>
 
       {eqOpen ? <EqualizerPanel anchorRef={eqToggleRef} /> : null}
-      {spectrumOpen ? <SpectrumPanel /> : null}
+      {/* No SpectrumPanel here: it overlays the content area, so App
+          mounts it inside <main class="content"> (see .spectrum-panel). */}
       {fxOpen ? <ArtEffectsPanel anchorRef={fxToggleRef} /> : null}
 
       <div className="transport">

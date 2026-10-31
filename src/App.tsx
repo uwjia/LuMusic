@@ -6,6 +6,7 @@ import { LibraryPage } from '@/features/library/LibraryPage';
 import { LyricsPage } from '@/features/lyrics/LyricsPage';
 import { PlayerBar } from '@/features/player/PlayerBar';
 import { PlaylistPage } from '@/features/playlists/PlaylistPage';
+import { SpectrumPanel } from '@/features/player/SpectrumPanel';
 import { Sidebar } from '@/features/playlists/Sidebar';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { TitleBar } from '@/features/shell/TitleBar';
@@ -15,6 +16,7 @@ import { useLibraryStore } from '@/stores/libraryStore';
 import { useLyricsStore } from '@/stores/lyricsStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
+import { useSpectrumStore } from '@/stores/spectrumStore';
 
 type View = { kind: 'library' } | { kind: 'settings' } | { kind: 'playlist'; id: string };
 
@@ -23,6 +25,9 @@ export default function App() {
   // Lyrics is a full-content page toggled from the player bar (not a
   // sidebar destination), so it lives beside the routed views.
   const lyricsOpen = useLyricsStore((s) => s.open);
+  // The spectrum overlay is anchored to the content area, so it mounts
+  // here (its CSS containing block) rather than in the player bar.
+  const spectrumOpen = useSpectrumStore((s) => s.open);
 
   // Picking any sidebar destination (library / settings / playlist) is an
   // explicit request to leave the lyrics page, so navigation dismisses it.
@@ -59,6 +64,7 @@ export default function App() {
             {view.kind === 'playlist' ? <PlaylistPage playlistId={view.id} /> : null}
           </>
         )}
+        {spectrumOpen ? <SpectrumPanel /> : null}
       </main>
       <PlayerBar />
     </div>

@@ -243,15 +243,17 @@ describe('PlayerBar', () => {
     usePlayerStore.setState({ state: state() });
     render(<PlayerBar />);
 
-    // Opening the spectrum takes over the popover slot.
+    // Opening the spectrum takes over the popover slot (the overlay
+    // itself mounts in App's content area, so assert the store flag).
     fireEvent.click(screen.getByTestId('volume-toggle'));
     expect(screen.getByTestId('volume-popover')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('spectrum-toggle'));
     expect(screen.queryByTestId('volume-popover')).not.toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(true);
 
     // Reopening the volume then closes the spectrum; Escape dismisses.
     fireEvent.click(screen.getByTestId('volume-toggle'));
-    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(false);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('volume-popover')).not.toBeInTheDocument();
   });
@@ -277,34 +279,33 @@ describe('PlayerBar', () => {
     expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
   });
 
-  it('spectrum toggle opens the panel and is mutually exclusive with the EQ panel', async () => {
+  it('spectrum toggle flips the overlay flag and is mutually exclusive with the EQ panel', () => {
     usePlayerStore.setState({ state: state() });
     render(<PlayerBar />);
     const eqBtn = screen.getByTestId('eq-toggle');
     const spectrumBtn = screen.getByTestId('spectrum-toggle');
     expect(spectrumBtn).toHaveAttribute('aria-label', 'Show spectrum');
-    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(false);
 
     // Open the EQ first, then the spectrum: only the spectrum stays open.
+    // (The overlay itself mounts in App's content area, so the store
+    // flag is this bar's whole contract; mounting lives in App tests.)
     fireEvent.click(eqBtn);
     expect(screen.getByTestId('eq-panel')).toBeInTheDocument();
     fireEvent.click(spectrumBtn);
-    expect(await screen.findByTestId('spectrum-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
     expect(useSpectrumStore.getState().open).toBe(true);
+    expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
     expect(useEqualizerStore.getState().open).toBe(false);
-    expect(api.onSpectrum).toHaveBeenCalledTimes(1); // panel subscribes on mount
 
     // And back: reopening the EQ closes the spectrum.
     fireEvent.click(screen.getByTestId('eq-toggle'));
     expect(screen.getByTestId('eq-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(false);
 
     fireEvent.click(screen.getByTestId('spectrum-toggle'));
     expect(screen.getByTestId('spectrum-toggle')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByTestId('spectrum-toggle'));
     expect(useSpectrumStore.getState().open).toBe(false);
-    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
   });
 
   it('art effects toggle opens the picker and is mutually exclusive with EQ and spectrum', async () => {
@@ -318,10 +319,10 @@ describe('PlayerBar', () => {
 
     // Opening the spectrum first, then fx: only fx stays open.
     fireEvent.click(screen.getByTestId('spectrum-toggle'));
-    expect(screen.getByTestId('spectrum-panel')).toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(true);
     fireEvent.click(fxBtn);
     expect(await screen.findByTestId('fx-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(false);
     expect(screen.getByTestId('fx-toggle')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('fx-toggle')).toHaveAttribute('aria-label', 'Hide art effects');
     expect(screen.getByTestId('fx-toggle')).toHaveClass('is-active');

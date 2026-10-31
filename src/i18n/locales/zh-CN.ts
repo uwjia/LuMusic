@@ -73,8 +73,6 @@ export const zhCN: Record<MessageKey, string> = {
 
   // spectrum panel
   'spectrum.title': '频谱',
-  'spectrum.live': '实时',
-  'spectrum.idle': '待机',
   'spectrum.canvasLabel': '实时频谱',
 
   // 艺术特效面板（歌词页背景预设）

@@ -73,8 +73,6 @@ export const en = {
 
   // spectrum panel
   'spectrum.title': 'Spectrum',
-  'spectrum.live': 'Live',
-  'spectrum.idle': 'Idle',
   'spectrum.canvasLabel': 'Live frequency spectrum',
 
   // art effects panel (lyrics-page background presets)
