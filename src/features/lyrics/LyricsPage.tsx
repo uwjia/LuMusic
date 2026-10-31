@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { IconButton } from '@/components/ui/IconButton';
 import { LyricsIcon, SourceFileIcon } from '@/features/lyrics/LyricsIcons';
 import { formatDuration } from '@/lib/format';
-import { activeLyricIndex } from '@/lib/lyrics';
+import { activeLyricIndex, fileNameOf } from '@/lib/lyrics';
 import { useTranslation } from '@/i18n';
 import { useLyricsStore } from '@/stores/lyricsStore';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -58,15 +58,19 @@ export function LyricsPage() {
       <header className="page-header">
         <div className="lyrics-meta">
           <h2 className="lyrics-track">{track ? track.title : t('lyrics.title')}</h2>
-          <div className="lyrics-artist">
-            {track ? (track.artist ?? t('player.unknownArtist')) : ''}
+          {/* Artist and source share one row. Only the file name is shown;
+              the full path lives on the chip's hover tooltip. */}
+          <div className="lyrics-sub">
+            <span className="lyrics-artist">
+              {track ? (track.artist ?? t('player.unknownArtist')) : ''}
+            </span>
+            {sourcePath ? (
+              <span className="lyrics-source" title={sourcePath}>
+                <SourceFileIcon />
+                <span className="lyrics-source-path">{fileNameOf(sourcePath)}</span>
+              </span>
+            ) : null}
           </div>
-          {sourcePath ? (
-            <div className="lyrics-source" title={sourcePath}>
-              <SourceFileIcon />
-              <span className="lyrics-source-path">{sourcePath}</span>
-            </div>
-          ) : null}
         </div>
         <IconButton
           label={t('lyrics.close')}

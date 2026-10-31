@@ -88,12 +88,17 @@ describe('LyricsPage', () => {
     expect(api.lyricsGet).toHaveBeenCalledWith('t1');
     expect(screen.getByText('I Will Do')).toBeInTheDocument();
     expect(screen.getByText('Pierre')).toBeInTheDocument();
-    // Source path renders as a metadata pill with a file glyph and keeps
-    // the full path available on hover.
-    const chip = screen.getByText(lyrics.sourcePath!).closest('.lyrics-source');
+    // The chip shows only the .lrc file name; the full path is the hover
+    // tooltip, keeping the row tidy for deeply nested folders.
+    const chip = screen.getByText('will_do.lrc').closest('.lyrics-source');
     expect(chip).toBeTruthy();
     expect(chip!.querySelector('svg')).toBeInTheDocument();
     expect(chip).toHaveAttribute('title', lyrics.sourcePath!);
+    expect(chip).not.toHaveTextContent('C:/Data');
+    // Artist and the pill share one row (the title keeps its own line).
+    const sub = chip!.closest('.lyrics-sub');
+    expect(sub).toContainElement(screen.getByText('Pierre'));
+    expect(sub).not.toContainElement(screen.getByRole('heading'));
   });
 
   it('highlights the line sung at the current position', async () => {

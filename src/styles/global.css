@@ -851,6 +851,14 @@ button {
 
 /* ---------- lyrics page ---------- */
 
+/* Side breathing room: below the header's 1000px cap the column would
+   stretch edge-to-edge on the base .page's 16px inset, so widen it with
+   the viewport — the 24px floor keeps narrow windows clear of the frame
+   (mirrors the settings column's approach). */
+.page.lyrics-page {
+  padding-inline: clamp(24px, 4vw, 48px);
+}
+
 /* Header stays over a centered column so long file paths still truncate.
    The column and its fonts scale with the viewport (like the lines below)
    so a maximized window fills the space instead of hugging a 720px strip. */
@@ -859,7 +867,7 @@ button {
   margin-inline: auto;
 }
 
-/* Header rows: stacked with breathing room instead of glued lines. */
+/* Header: title on its own line, artist + source chip share one row. */
 .lyrics-meta {
   flex: 1;
   min-width: 0;
@@ -879,7 +887,18 @@ button {
   text-overflow: ellipsis;
 }
 
+/* Artist and the source chip sit on one line; min-width:0 lets both
+   ellipsize instead of pushing the close button out of the header. */
+.lyrics-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .lyrics-artist {
+  flex: 0 1 auto;
+  min-width: 3em;
   font-size: clamp(13px, 0.3vw + 10px, 17px);
   color: var(--fg-1);
   white-space: nowrap;
@@ -887,16 +906,17 @@ button {
   text-overflow: ellipsis;
 }
 
-/* Source path reads as metadata, not as a third text row: a quiet pill
-   with a file glyph; the path itself ellipsizes inside. */
+/* Source chip reads as metadata on the artist row, not as a third text
+   line: a quiet pill with a file glyph showing only the .lrc file name
+   (the full path is the hover tooltip; the ellipsis below is a safety
+   net for exotic names in narrow windows). */
 .lyrics-source {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  width: fit-content;
-  max-width: 100%;
-  margin-top: 2px;
-  padding: 2px 10px;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 1px 8px;
   border-radius: 999px;
   background: var(--bg-2);
   color: var(--fg-2);

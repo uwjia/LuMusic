@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeLyricIndex } from '@/lib/lyrics';
+import { activeLyricIndex, fileNameOf } from '@/lib/lyrics';
 import type { LyricLine } from '@/types/track';
 
 const lines: LyricLine[] = [
@@ -31,5 +31,18 @@ describe('activeLyricIndex', () => {
 
   it('handles empty lyrics', () => {
     expect(activeLyricIndex([], 10)).toBe(-1);
+  });
+});
+
+describe('fileNameOf', () => {
+  it('extracts the last segment from windows and posix paths', () => {
+    expect(fileNameOf('C:\\Data\\Music\\吸血鬼日记\\will_do.lrc')).toBe('will_do.lrc');
+    expect(fileNameOf('C:/Data/Music/will_do.lrc')).toBe('will_do.lrc');
+    expect(fileNameOf('will_do.lrc')).toBe('will_do.lrc');
+  });
+
+  it('ignores trailing separators and tolerates empty input', () => {
+    expect(fileNameOf('C:/Data/')).toBe('Data');
+    expect(fileNameOf('')).toBe('');
   });
 });

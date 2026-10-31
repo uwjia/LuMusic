@@ -3,6 +3,17 @@
 import type { LyricLine } from '@/types/track';
 
 /**
+ * Final path segment of a file path (`C:\Data\will_do.lrc` → `will_do.lrc`).
+ * Handles both separators: backend paths follow the host OS (`\` on
+ * Windows), tests and mocks use `/`.
+ */
+export function fileNameOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return cut === -1 ? trimmed : trimmed.slice(cut + 1);
+}
+
+/**
  * Index of the line sung at `positionSecs`: the last line at or before the
  * position (the backend delivers lines sorted by `timeMs`). `-1` while the
  * song intro plays, before the first line.
