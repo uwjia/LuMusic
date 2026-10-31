@@ -1023,3 +1023,107 @@ button {
   color: var(--danger);
   font-size: 12px;
 }
+
+/* ---------- equalizer panel ---------- */
+
+/* Anchor for the popover; absolutely positioned children ignore the grid. */
+.player-bar {
+  position: relative;
+}
+
+.eq-panel {
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 10px);
+  z-index: 900;
+  width: min(540px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.eq-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.eq-head h3 {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+}
+
+.eq-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eq-preset-label {
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+.eq-select {
+  flex: 0 1 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg-0);
+}
+
+.eq-bands {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 0 0;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.eq-band-value {
+  min-width: 32px;
+  font-size: 11px;
+  color: var(--fg-2);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.eq-band-label {
+  font-size: 11px;
+  color: var(--fg-1);
+}
+
+.eq-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 8px;
+  background: var(--bg-3);
+}
+
+/* Vertical faders: modern range inputs rotate via writing-mode; rtl makes
+   the value grow upward. WebView2 (Chromium) supports this combination. */
+.eq-band-slider {
+  width: 22px;
+  height: 130px;
+  writing-mode: vertical-lr;
+  direction: rtl;
+}
+
+.eq-error {
+  color: var(--danger);
+  font-size: 12px;
+}

@@ -7,6 +7,7 @@
 
 import type { PlayerApi, Unsubscribe } from '@/api/types';
 import type {
+  EqSettings,
   Lyrics,
   PlayerState,
   Playlist,
@@ -101,6 +102,8 @@ class MockApi implements PlayerApi {
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private closeToTray = true;
+  /** Mirrors the persisted backend EQ (disabled/flat by default). */
+  private eq: EqSettings = { enabled: false, preampDb: 0, gainsDb: Array(10).fill(0) };
   private trayLabels: TrayLabels | null = null;
   /** Only t1 "ships" with a sibling .lrc file. */
   private lyrics = new Map<string, Lyrics>([['t1', SAMPLE_LYRICS]]);
@@ -406,12 +409,27 @@ class MockApi implements PlayerApi {
   }
 
   async settingsGet(): Promise<Settings> {
-    return { volume: this.volume, lastFolder: TRACKS_ROOT, closeToTray: this.closeToTray };
+    return {
+      volume: this.volume,
+      lastFolder: TRACKS_ROOT,
+      closeToTray: this.closeToTray,
+      eq: { ...this.eq, gainsDb: [...this.eq.gainsDb] },
+    };
   }
 
-  async settingsSet(closeToTray?: boolean): Promise<Settings> {
+  async settingsSet(patch: { closeToTray?: boolean; eq?: EqSettings }): Promise<Settings> {
     // Mirrors the backend: only provided fields change, the rest persists.
-    if (closeToTray != null) this.closeToTray = closeToTray;
+    if (patch.closeToTray != null) this.closeToTray = patch.closeToTray;
+    if (patch.eq != null) {
+      // Mirrors backend sanitization: clamp + pad/truncate to 10 bands.
+      const gains = patch.eq.gainsDb.slice(0, 10);
+      while (gains.length < 10) gains.push(0);
+      this.eq = {
+        enabled: patch.eq.enabled,
+        preampDb: Math.min(12, Math.max(-12, patch.eq.preampDb || 0)),
+        gainsDb: gains.map((g) => Math.min(12, Math.max(-12, g || 0))),
+      };
+    }
     return this.settingsGet();
   }
 

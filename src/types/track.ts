@@ -71,6 +71,16 @@ export interface Settings {
   lastFolder: string | null;
   /** Keep running in the tray (music keeps playing) when the window closes. */
   closeToTray: boolean;
+  /** Equalizer configuration (mirrors `EqSettings` in domain/equalizer.rs). */
+  eq: EqSettings;
+}
+
+export interface EqSettings {
+  enabled: boolean;
+  /** Global gain before the band filters, in dB. */
+  preampDb: number;
+  /** Per-band gains in dB; always `EQ_BAND_COUNT` entries. */
+  gainsDb: number[];
 }
 
 /** Localized labels for the native tray menu, pushed from the i18n layer

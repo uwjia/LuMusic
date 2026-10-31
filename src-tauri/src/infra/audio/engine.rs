@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 
+use super::equalizer::{EqualizerSource, SharedEq};
 use super::symphonia_source::{PosTracker, SourceError, SymphoniaSource};
+use crate::domain::equalizer::EqSettings;
 use symphonia::core::io::MediaSourceStream;
 
 /// Engine-level errors.
@@ -50,6 +52,8 @@ pub trait AudioEngine: Send {
     fn stop(&mut self);
     /// Linear volume 0.0 - 1.0.
     fn set_volume(&mut self, volume: f32);
+    /// Applies equalizer settings live (no sink recreation, no gap).
+    fn set_eq(&mut self, eq: &EqSettings);
     /// Seeks within the current track (no-op when nothing is loaded).
     fn seek(&mut self, secs: f64) -> Result<(), AudioError>;
     fn position_secs(&self) -> f64;
@@ -82,6 +86,9 @@ enum Command {
     SetVolume {
         volume: f32,
     },
+    SetEq {
+        eq: EqSettings,
+    },
     Seek {
         secs: f64,
         reply: Reply<Result<(), AudioError>>,
@@ -110,6 +117,9 @@ struct DeviceState {
     paused: bool,
     path: Option<PathBuf>,
     tracker: Option<Arc<PosTracker>>,
+    /// Live equalizer state, read by every appended `EqualizerSource`;
+    /// outlives individual sinks so track changes keep the curve.
+    eq: Arc<SharedEq>,
 }
 
 impl DeviceState {
@@ -136,7 +146,7 @@ impl DeviceState {
         let tracker = source.position_tracker();
         let sink = Sink::try_new(&self.handle).map_err(|_| AudioError::NoDevice)?;
         sink.set_volume(self.volume);
-        sink.append(source);
+        sink.append(EqualizerSource::new(source, self.eq.clone()));
         // Replacing the previous sink drops (and therefore stops) it.
         self.sink = Some(sink);
         self.tracker = Some(tracker.clone());
@@ -162,6 +172,8 @@ impl RodioEngine {
         let thread_snapshot = snapshot.clone();
         let (tx, rx) = mpsc::channel::<Command>();
         let (init_tx, init_rx) = mpsc::channel::<Result<(), AudioError>>();
+        let eq = Arc::new(SharedEq::new(EqSettings::default()));
+        let thread_eq = eq.clone();
         std::thread::Builder::new()
             .name("lumusic-audio".into())
             .spawn(move || {
@@ -180,6 +192,7 @@ impl RodioEngine {
                     paused: false,
                     path: None,
                     tracker: None,
+                    eq: thread_eq,
                 };
                 let _ = init_tx.send(Ok(()));
                 audio_loop(state, rx, thread_snapshot);
@@ -262,6 +275,11 @@ fn audio_loop(
                     sink.set_volume(state.volume);
                 }
             }
+            Command::SetEq { eq } => {
+                // Publishes to the shared state every appended source reads;
+                // takes effect within a few samples, no sink recreation.
+                state.eq.set(eq);
+            }
             Command::Seek { secs, reply } => {
                 let result = match state.path.clone() {
                     Some(path) => state.open_at(&path, Some(secs)).map(|_| ()),
@@ -300,6 +318,10 @@ impl AudioEngine for RodioEngine {
 
     fn set_volume(&mut self, volume: f32) {
         let _ = self.tx.send(Command::SetVolume { volume });
+    }
+
+    fn set_eq(&mut self, eq: &EqSettings) {
+        let _ = self.tx.send(Command::SetEq { eq: eq.clone() });
     }
 
     fn seek(&mut self, secs: f64) -> Result<(), AudioError> {
@@ -388,6 +410,9 @@ impl AudioEngine for NullEngine {
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
     }
+
+    /// No output device: accepts the command, nothing to filter.
+    fn set_eq(&mut self, _eq: &EqSettings) {}
 
     fn seek(&mut self, _secs: f64) -> Result<(), AudioError> {
         Ok(())

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::equalizer::EqSettings;
+
 /// Application settings. `volume` is stored linear (0.0 - 1.0).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -12,6 +14,8 @@ pub struct Settings {
     /// Keep running in the tray (music keeps playing) when the window is
     /// closed instead of exiting the app.
     pub close_to_tray: bool,
+    /// Equalizer configuration (see `domain::equalizer`).
+    pub eq: EqSettings,
 }
 
 impl Default for Settings {
@@ -23,6 +27,7 @@ impl Default for Settings {
             // background by default; users who dislike it can opt out in
             // the settings page.
             close_to_tray: true,
+            eq: EqSettings::default(),
         }
     }
 }
@@ -57,6 +62,7 @@ mod tests {
         assert!((0.0..=1.0).contains(&s.volume));
         assert_eq!(s.last_folder, None);
         assert!(s.close_to_tray);
+        assert_eq!(s.eq, EqSettings::default());
     }
 
     #[test]
@@ -68,5 +74,35 @@ mod tests {
         assert_eq!(parsed.volume, 0.5);
         assert_eq!(parsed.last_folder.as_deref(), Some("C:/Music"));
         assert!(parsed.close_to_tray);
+    }
+
+    #[test]
+    fn legacy_settings_file_without_eq_backfills_flat_default() {
+        // settings.json written before the equalizer existed lacks `eq`;
+        // it must parse to the disabled/flat default, never fail startup.
+        let parsed: Settings = serde_json::from_str(
+            r#"{ "volume": 0.5, "lastFolder": "C:/Music", "closeToTray": false }"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.eq, EqSettings::default());
+        assert!(!parsed.eq.enabled);
+    }
+
+    #[test]
+    fn eq_settings_round_trip_through_camel_case_json() {
+        let settings = Settings {
+            eq: EqSettings {
+                enabled: true,
+                preamp_db: -3.5,
+                gains_db: vec![4.0, 2.0, 0.0, -1.0, 0.0, 0.0, 1.0, 2.0, 3.0, 5.0],
+            },
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""eq""#));
+        assert!(json.contains(r#""preampDb":-3.5"#));
+        assert!(json.contains(r#""enabled":true"#));
+        let parsed: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, settings);
     }
 }

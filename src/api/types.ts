@@ -53,7 +53,8 @@ export interface PlayerApi {
 
   // settings
   settingsGet(): Promise<Settings>;
-  settingsSet(closeToTray?: boolean): Promise<Settings>;
+  /** Partial settings update: only provided fields change. */
+  settingsSet(patch: { closeToTray?: boolean; eq?: Settings['eq'] }): Promise<Settings>;
 
   // tray (native menu owned by the backend; labels are display-layer i18n)
   traySetLabels(labels: TrayLabels): Promise<void>;

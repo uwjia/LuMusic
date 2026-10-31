@@ -11,6 +11,7 @@ use super::dto::{LyricsDto, PlayerStateDto, ScanProgressDto};
 use super::service::{PlayerError, PlayerService};
 use super::state::SharedService;
 use super::tray::{TrayController, TrayLabels};
+use crate::domain::equalizer::EqSettings;
 use crate::domain::library::TrackQuery;
 use crate::domain::playlist::Playlist;
 use crate::domain::queue::RepeatMode;
@@ -330,15 +331,20 @@ pub fn settings_get(state: State<'_, SharedService>) -> Result<Settings, String>
 }
 
 /// Partial settings update (the `player_set_mode` pattern: only provided
-/// fields change). Currently `close_to_tray` is the only mutable field.
+/// fields change). `eq` carries the full equalizer configuration because a
+/// curve is meaningless without all its bands.
 #[tauri::command]
 pub fn settings_set(
     state: State<'_, SharedService>,
     close_to_tray: Option<bool>,
+    eq: Option<EqSettings>,
 ) -> Result<Settings, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     if let Some(on) = close_to_tray {
         service.set_close_to_tray(on);
+    }
+    if let Some(eq) = eq {
+        service.set_eq(eq);
     }
     Ok(service.settings())
 }

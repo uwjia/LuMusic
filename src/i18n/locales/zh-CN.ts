@@ -64,6 +64,26 @@ export const zhCN: Record<MessageKey, string> = {
   'player.volume': '音量',
   'player.showLyrics': '显示歌词',
   'player.hideLyrics': '隐藏歌词',
+  'player.showEqualizer': '显示均衡器',
+  'player.hideEqualizer': '隐藏均衡器',
+
+  // equalizer panel
+  'eq.title': '均衡器',
+  'eq.enable': '启用',
+  'eq.preset': '预设',
+  'eq.preset.custom': '自定义',
+  'eq.preset.flat': '平直',
+  'eq.preset.rock': '摇滚',
+  'eq.preset.pop': '流行',
+  'eq.preset.jazz': '爵士',
+  'eq.preset.classical': '古典',
+  'eq.preset.electronic': '电子',
+  'eq.preset.bassBoost': '低音增强',
+  'eq.preset.trebleBoost': '高音增强',
+  'eq.reset': '重置',
+  'eq.preamp': '前置增益（dB）',
+  'eq.preampShort': '前置',
+  'eq.band': '{freq} Hz 增益',
 
   // 歌词页面
   'lyrics.title': '歌词',

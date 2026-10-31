@@ -4,6 +4,7 @@
 //! live in `crate::infra` and orchestration in `crate::app`.
 
 pub mod encoding;
+pub mod equalizer;
 pub mod library;
 pub mod lyrics;
 pub mod playlist;

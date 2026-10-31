@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::dto::{LyricsDto, PlaybackStatus, PlayerStateDto};
+use crate::domain::equalizer::EqSettings;
 use crate::domain::library::{LibraryIndex, TrackQuery};
 use crate::domain::lyrics;
 use crate::domain::playlist::{PlaylistCollection, PlaylistError, Playlist};
@@ -115,6 +116,7 @@ impl PlayerService {
             last_session_save: Instant::now(),
         };
         service.engine.set_volume(service.settings.volume);
+        service.engine.set_eq(&service.settings.eq);
         service.restore_session(session);
         Ok(service)
     }
@@ -539,6 +541,18 @@ impl PlayerService {
         self.settings.clone()
     }
 
+    /// Applies equalizer settings live and persists them (flushed
+    /// immediately so a tuned curve survives a crash; input is untrusted —
+    /// UI-supplied gains are sanitized before reaching the engine).
+    pub fn set_eq(&mut self, eq: EqSettings) {
+        let sanitized = eq.sanitize();
+        self.settings.eq = sanitized.clone();
+        self.engine.set_eq(&sanitized);
+        if let Err(err) = self.persistence.save_settings(&self.settings) {
+            tracing::warn!("failed to persist settings: {err}");
+        }
+    }
+
     /// Persists the close-to-tray behavior (flushed immediately: it changes
     /// what a window close means, so it must survive a crash).
     pub fn set_close_to_tray(&mut self, on: bool) {
@@ -662,6 +676,14 @@ mod tests {
         }
         fn set_volume(&mut self, volume: f32) {
             self.state.lock().unwrap().volume = volume;
+        }
+        fn set_eq(&mut self, eq: &EqSettings) {
+            let mut s = self.state.lock().unwrap();
+            s.log.push(if eq.enabled {
+                format!("eq:on:{}", eq.gains_db.first().map(|g| g.to_string()).unwrap_or_default())
+            } else {
+                "eq:off".to_string()
+            });
         }
         fn seek(&mut self, secs: f64) -> Result<(), crate::infra::audio::engine::AudioError> {
             let mut s = self.state.lock().unwrap();
@@ -792,6 +814,7 @@ mod tests {
         assert_eq!(
             log_of(&engine),
             vec![
+                "eq:off", // startup applies the persisted (default) curve
                 "open:C:/lib/a.mp3",
                 "pause",
                 "resume",
@@ -1088,7 +1111,7 @@ mod tests {
         assert!(state.shuffle);
         assert_eq!(
             log_of(&engine_state),
-            vec!["openPaused:C:/lib/a.mp3@4.0".to_string()]
+            vec!["eq:off", "openPaused:C:/lib/a.mp3@4.0"]
         );
 
         // Restored paused: the poller must not treat it as playing/finished.
@@ -1219,6 +1242,51 @@ mod tests {
             service.lyrics_for_track("C:/lib/ghost.mp3"),
             Err(PlayerError::TrackNotFound(_))
         ));
+    }
+
+    // ---------- close-to-tray setting ----------
+
+    // ---------- equalizer ----------
+
+    #[test]
+    fn set_eq_sanitizes_forwards_to_engine_and_persists() {
+        let (mut service, engine, dir) = service_with_tracks();
+        service.set_eq(EqSettings {
+            enabled: true,
+            preamp_db: f32::NAN,
+            gains_db: vec![99.0, f32::NAN, -99.0], // too short + out of range
+        });
+        // Sanitized: clamped gains, NaN collapsed, padded to 10 bands.
+        let stored = service.settings().eq.clone();
+        assert!(stored.enabled);
+        assert_eq!(stored.preamp_db, 0.0);
+        assert_eq!(stored.gains_db[0], 12.0);
+        assert_eq!(stored.gains_db[1], 0.0);
+        assert_eq!(stored.gains_db[2], -12.0);
+        assert_eq!(stored.gains_db.len(), 10);
+        // Forwarded to the engine in the same (sanitized) shape.
+        assert_eq!(log_of(&engine).last().unwrap(), "eq:on:12");
+        // Persisted: a fresh launch reads the same curve from disk.
+        assert_eq!(
+            JsonPersistence::new(dir.path()).load_settings().unwrap().eq,
+            stored
+        );
+    }
+
+    #[test]
+    fn startup_applies_persisted_eq_to_engine() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        service.set_eq(EqSettings {
+            enabled: false,
+            preamp_db: 0.0,
+            gains_db: vec![3.0; 10],
+        });
+        drop(service);
+
+        let (restored, engine_state) = reopen(dir.path());
+        assert_eq!(restored.settings().eq.gains_db, vec![3.0; 10]);
+        // The engine received the persisted curve during construction.
+        assert!(log_of(&engine_state).contains(&"eq:off".to_string()));
     }
 
     // ---------- close-to-tray setting ----------

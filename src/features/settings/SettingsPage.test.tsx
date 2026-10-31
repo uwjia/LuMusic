@@ -20,17 +20,21 @@ vi.mock('@/api', () => ({
 // value matters to the page.
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
+const eqSettings = { enabled: false, preampDb: 0, gainsDb: Array(10).fill(0) };
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(api.settingsGet).mockResolvedValue({
     volume: 0.8,
     lastFolder: 'C:/Music',
     closeToTray: true,
+    eq: eqSettings,
   });
   vi.mocked(api.settingsSet).mockResolvedValue({
     volume: 0.8,
     lastFolder: 'C:/Music',
     closeToTray: true,
+    eq: eqSettings,
   });
   vi.mocked(api.appInfo).mockResolvedValue({ name: 'LuMusic', version: '0.1.0' });
   useLibraryStore.setState({
@@ -128,10 +132,10 @@ describe('SettingsPage tray section', () => {
 
     fireEvent.click(box);
     expect(box).not.toBeChecked();
-    expect(api.settingsSet).toHaveBeenCalledWith(false);
+    expect(api.settingsSet).toHaveBeenCalledWith({ closeToTray: false });
 
     fireEvent.click(box);
-    expect(api.settingsSet).toHaveBeenLastCalledWith(true);
+    expect(api.settingsSet).toHaveBeenLastCalledWith({ closeToTray: true });
   });
 
   it('starts unchecked when the setting is off', async () => {
@@ -139,6 +143,7 @@ describe('SettingsPage tray section', () => {
       volume: 0.8,
       lastFolder: 'C:/Music',
       closeToTray: false,
+      eq: eqSettings,
     });
     render(<SettingsPage />);
     expect(await screen.findByLabelText('Close to tray')).not.toBeChecked();

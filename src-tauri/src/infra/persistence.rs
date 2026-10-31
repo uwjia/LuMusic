@@ -164,6 +164,7 @@ mod tests {
             volume: 0.25,
             last_folder: Some("C:/music".into()),
             close_to_tray: false,
+            ..Settings::default()
         };
         store.save_settings(&settings).unwrap();
         assert_eq!(store.load_settings().unwrap(), settings);

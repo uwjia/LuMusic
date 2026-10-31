@@ -64,6 +64,26 @@ export const en = {
   'player.volume': 'Volume',
   'player.showLyrics': 'Show lyrics',
   'player.hideLyrics': 'Hide lyrics',
+  'player.showEqualizer': 'Show equalizer',
+  'player.hideEqualizer': 'Hide equalizer',
+
+  // equalizer panel
+  'eq.title': 'Equalizer',
+  'eq.enable': 'Enable',
+  'eq.preset': 'Preset',
+  'eq.preset.custom': 'Custom',
+  'eq.preset.flat': 'Flat',
+  'eq.preset.rock': 'Rock',
+  'eq.preset.pop': 'Pop',
+  'eq.preset.jazz': 'Jazz',
+  'eq.preset.classical': 'Classical',
+  'eq.preset.electronic': 'Electronic',
+  'eq.preset.bassBoost': 'Bass Boost',
+  'eq.preset.trebleBoost': 'Treble Boost',
+  'eq.reset': 'Reset',
+  'eq.preamp': 'Preamp (dB)',
+  'eq.preampShort': 'Pre',
+  'eq.band': '{freq} Hz gain',
 
   // lyrics page
   'lyrics.title': 'Lyrics',

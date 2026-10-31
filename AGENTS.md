@@ -104,6 +104,8 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 
 ### Non-goals（当前不做）
 
-均衡器、无缝播放、标签编辑、封面提取。遇到相关需求先确认范围。
+无缝播放、标签编辑、封面提取。遇到相关需求先确认范围。
 
 （歌词已实现：`domain/lyrics.rs` 解析、`infra/lyrics.rs` 同名 `.lrc` 自动关联 + 编码修复、`features/lyrics` 渲染页，入口在播放模式按钮左侧。）
+
+（均衡器已实现：`domain/equalizer.rs` RBJ biquad 设计 + 设置净化、`infra/audio/equalizer.rs` 实时滤波（`SharedEq` 代数计数，播放中换系数不重建 sink）、`features/player/EqualizerPanel` 弹出面板 + `lib/equalizer.ts` 内置预设，入口在歌词按钮右侧；配置持久化于 `settings.json` 的 `eq` 字段。）

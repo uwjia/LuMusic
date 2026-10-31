@@ -5,6 +5,7 @@ import { api } from '@/api';
 import type { PlayerState, Track } from '@/types/track';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useLyricsStore } from '@/stores/lyricsStore';
+import { DEFAULT_EQ, useEqualizerStore } from '@/stores/equalizerStore';
 import { PlayerBar } from '@/features/player/PlayerBar';
 
 vi.mock('@/api', () => ({
@@ -19,6 +20,8 @@ vi.mock('@/api', () => ({
     playerSeek: vi.fn(),
     playerSetVolume: vi.fn(),
     playerSetMode: vi.fn(),
+    settingsGet: vi.fn(),
+    settingsSet: vi.fn(),
   },
 }));
 
@@ -54,6 +57,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   usePlayerStore.setState({ state: null, error: null });
   useLyricsStore.setState({ open: false });
+  useEqualizerStore.setState({ open: false, eq: DEFAULT_EQ, loaded: false, error: null });
+  vi.mocked(api.settingsGet).mockResolvedValue({
+    volume: 0.5,
+    lastFolder: null,
+    closeToTray: true,
+    eq: DEFAULT_EQ,
+  });
 });
 
 describe('PlayerBar', () => {
@@ -134,6 +144,27 @@ describe('PlayerBar', () => {
 
     fireEvent.click(screen.getByTestId('lyrics-toggle'));
     expect(useLyricsStore.getState().open).toBe(false);
+  });
+
+  it('equalizer toggle opens a panel that loads settings, and closes again', async () => {
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+    const eqBtn = screen.getByTestId('eq-toggle');
+    expect(eqBtn).toHaveAttribute('aria-label', 'Show equalizer');
+    expect(eqBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
+
+    fireEvent.click(eqBtn);
+    expect(useEqualizerStore.getState().open).toBe(true);
+    expect(await screen.findByTestId('eq-panel')).toBeInTheDocument();
+    expect(api.settingsGet).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('eq-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('eq-toggle')).toHaveAttribute('aria-label', 'Hide equalizer');
+    expect(screen.getByTestId('eq-toggle')).toHaveClass('is-active');
+
+    fireEvent.click(screen.getByTestId('eq-toggle'));
+    expect(useEqualizerStore.getState().open).toBe(false);
+    expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
   });
 
   it('volume slider commits on release', async () => {

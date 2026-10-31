@@ -1,13 +1,17 @@
 // Bottom transport bar: play controls, seek, volume, now-playing title.
 
+import { useRef } from 'react';
 import { formatDuration } from '@/lib/format';
 import { Slider } from '@/components/ui/Slider';
 import { IconButton } from '@/components/ui/IconButton';
 import { useTranslation } from '@/i18n';
 import { playModeOf, usePlayerStore, type PlayMode } from '@/stores/playerStore';
 import { useLyricsStore } from '@/stores/lyricsStore';
+import { useEqualizerStore } from '@/stores/equalizerStore';
 import { MODE_ICON } from '@/features/player/ModeIcons';
 import { LyricsIcon } from '@/features/lyrics/LyricsIcons';
+import { EqualizerIcon } from '@/features/player/EqualizerIcons';
+import { EqualizerPanel } from '@/features/player/EqualizerPanel';
 const MODE_LABEL_KEY: Record<
   PlayMode,
   'player.modeSequential' | 'player.repeatAll' | 'player.repeatOne' | 'player.shuffle'
@@ -22,8 +26,13 @@ export function PlayerBar() {
   const state = usePlayerStore((s) => s.state);
   const error = usePlayerStore((s) => s.error);
   const lyricsOpen = useLyricsStore((s) => s.open);
+  const eqOpen = useEqualizerStore((s) => s.open);
   const { toggle, next, prev, seek, setVolume, cyclePlayMode } = usePlayerStore.getState();
   const toggleLyrics = useLyricsStore.getState().toggle;
+  const toggleEq = useEqualizerStore.getState().toggle;
+  // Anchor for the popover's outside-press exclusion (the toggle button
+  // itself must toggle, not close-then-reopen).
+  const eqToggleRef = useRef<HTMLButtonElement>(null);
   const { t } = useTranslation();
 
   if (!state) {
@@ -49,6 +58,8 @@ export function PlayerBar() {
         )}
       </div>
 
+      {eqOpen ? <EqualizerPanel anchorRef={eqToggleRef} /> : null}
+
       <div className="transport">
         <div className="transport-buttons">
           <IconButton
@@ -59,6 +70,16 @@ export function PlayerBar() {
             data-testid="lyrics-toggle"
           >
             <LyricsIcon />
+          </IconButton>
+          <IconButton
+            ref={eqToggleRef}
+            label={eqOpen ? t('player.hideEqualizer') : t('player.showEqualizer')}
+            active={eqOpen}
+            aria-pressed={eqOpen}
+            onClick={toggleEq}
+            data-testid="eq-toggle"
+          >
+            <EqualizerIcon />
           </IconButton>
           <IconButton
             label={t(MODE_LABEL_KEY[mode])}

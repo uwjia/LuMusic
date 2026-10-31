@@ -92,12 +92,28 @@ describe('mock auto playlists', () => {
 describe('mock settings + tray seam', () => {
   it('settingsGet exposes closeToTray and settingsSet only changes provided fields', async () => {
     expect((await mockApi.settingsGet()).closeToTray).toBe(true);
-    const updated = await mockApi.settingsSet(false);
+    const updated = await mockApi.settingsSet({ closeToTray: false });
     expect(updated.closeToTray).toBe(false);
     expect((await mockApi.settingsGet()).closeToTray).toBe(false);
-    // Calling without arguments is a no-op (mirrors player_set_mode).
-    await mockApi.settingsSet(undefined);
+    // Calling without fields is a no-op (mirrors player_set_mode).
+    await mockApi.settingsSet({});
     expect((await mockApi.settingsGet()).closeToTray).toBe(false);
+  });
+
+  it('eq round-trips through settingsSet with backend-style sanitization', async () => {
+    // mockApi is a shared singleton: capture the sibling field first so the
+    // assertion holds regardless of test order.
+    const before = await mockApi.settingsGet();
+    const updated = await mockApi.settingsSet({
+      eq: { enabled: true, preampDb: 99, gainsDb: [99, Number.NaN, -99, 5] },
+    });
+    expect(updated.eq.enabled).toBe(true);
+    // Clamped to ±12, NaN collapsed, padded to ten bands.
+    expect(updated.eq.preampDb).toBe(12);
+    expect(updated.eq.gainsDb).toEqual([12, 0, -12, 5, 0, 0, 0, 0, 0, 0]);
+    expect((await mockApi.settingsGet()).eq).toEqual(updated.eq);
+    // Other fields are untouched by an eq-only patch.
+    expect((await mockApi.settingsGet()).closeToTray).toBe(before.closeToTray);
   });
 
   it('records the last pushed tray labels', async () => {

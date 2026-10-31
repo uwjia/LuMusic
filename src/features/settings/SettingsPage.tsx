@@ -41,7 +41,7 @@ export function SettingsPage() {
   // Optimistic toggle: the backend persists the setting for the next launch.
   const toggleCloseToTray = (next: boolean) => {
     setCloseToTray(next);
-    void api.settingsSet(next);
+    void api.settingsSet({ closeToTray: next });
   };
 
   const pickFolder = async () => {

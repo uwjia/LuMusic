@@ -67,7 +67,12 @@ export const tauriApi: PlayerApi = {
   playlistGetTracks: (id) => invoke('playlist_get_tracks', { id }),
 
   settingsGet: () => invoke('settings_get'),
-  settingsSet: (closeToTray) => invoke('settings_set', { closeToTray }),
+  // Missing fields are sent as explicit nulls so serde maps them to None.
+  settingsSet: (patch) =>
+    invoke('settings_set', {
+      closeToTray: patch.closeToTray ?? null,
+      eq: patch.eq ?? null,
+    }),
   traySetLabels: (labels) => invoke('tray_set_labels', { labels }),
 
   onPlayerState: (cb) => wire<PlayerState>(PLAYER_STATE_EVENT, cb),
