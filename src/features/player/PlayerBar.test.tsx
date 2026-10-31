@@ -1,6 +1,6 @@
 // Behavior tests for the transport bar (store + api mocked at the seam).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { api } from '@/api';
 import type { PlayerState, Track } from '@/types/track';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -130,13 +130,14 @@ describe('PlayerBar', () => {
     await vi.waitFor(() => expect(api.playerSetMode).toHaveBeenCalledWith(false, 'off'));
   });
 
-  it('lyrics toggle sits left of the play mode button and flips the page flag', () => {
+  it('lyrics toggle mirrors the play mode button around the cluster and flips the page flag', () => {
     usePlayerStore.setState({ state: state() });
     render(<PlayerBar />);
     const lyricsBtn = screen.getByTestId('lyrics-toggle');
     const modeBtn = screen.getByTestId('play-mode-btn');
-    // Entry requirement: the lyrics button is placed before the mode button.
-    expect(lyricsBtn.compareDocumentPosition(modeBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 2+2 symmetry pin: the mode button is the left flank, the lyrics
+    // button the right flank of the transport cluster.
+    expect(modeBtn.compareDocumentPosition(lyricsBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(lyricsBtn).toHaveAttribute('aria-label', 'Show lyrics');
     expect(lyricsBtn).toHaveAttribute('aria-pressed', 'false');
     expect(lyricsBtn.querySelector('svg')).toBeInTheDocument();
@@ -149,6 +150,110 @@ describe('PlayerBar', () => {
 
     fireEvent.click(screen.getByTestId('lyrics-toggle'));
     expect(useLyricsStore.getState().open).toBe(false);
+  });
+
+  it('centers a 2+2 symmetric cluster; audio panels dock right of it', () => {
+    // Layout pin: the play button sits exactly at the cluster center with
+    // two buttons on each side (mode/prev left, next/lyrics right), while
+    // the EQ/spectrum/fx toggles live in the right-hand dock between
+    // transport and volume — not mixed into the transport row.
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+
+    const cluster = screen.getByTestId('play-toggle').closest('.transport-buttons')!;
+    const clusterLabels = [...cluster.querySelectorAll('button')].map((b) =>
+      b.getAttribute('aria-label'),
+    );
+    expect(clusterLabels).toEqual([
+      'Sequential play',
+      'Previous track',
+      'Pause',
+      'Next track',
+      'Show lyrics',
+    ]);
+
+    const dock = screen.getByTestId('eq-toggle').closest('.bar-tools')!;
+    expect([...dock.children].map((c) => c.getAttribute('data-testid'))).toEqual([
+      'eq-toggle',
+      'spectrum-toggle',
+      'fx-toggle',
+      'volume-toggle',
+    ]);
+
+    const transport = screen.getByTestId('play-toggle').closest('.transport')!;
+    expect(
+      transport.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('volume toggle opens the vertical fader popover and commits on release', async () => {
+    vi.mocked(api.playerSetVolume).mockResolvedValue(state({ volume: 0.9 }));
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+
+    fireEvent.click(screen.getByTestId('volume-toggle'));
+    expect(screen.getByTestId('volume-toggle')).toHaveAttribute('aria-pressed', 'true');
+    const slider = screen.getByTestId('volume-slider') as HTMLInputElement;
+    fireEvent.change(slider, { target: { value: '0.9' } });
+    fireEvent.pointerUp(slider);
+    await vi.waitFor(() => expect(api.playerSetVolume).toHaveBeenCalledWith(0.9));
+    // The percent mirror follows the committed value.
+    await waitFor(() => expect(screen.getByText('90%')).toBeInTheDocument());
+
+    // Clicking the toggle again closes the popover.
+    fireEvent.click(screen.getByTestId('volume-toggle'));
+    expect(screen.queryByTestId('volume-popover')).not.toBeInTheDocument();
+  });
+
+  it('mouse wheel over the speaker button nudges volume without opening the popover', async () => {
+    // Zero-click path: hovering the icon and scrolling is enough; the
+    // debounced wheel handler collapses a burst into one api call.
+    vi.useFakeTimers();
+    try {
+      vi.mocked(api.playerSetVolume).mockResolvedValue(state({ volume: 0.55 }));
+      usePlayerStore.setState({ state: state({ volume: 0.5 }) });
+      render(<PlayerBar />);
+      fireEvent.wheel(screen.getByTestId('volume-toggle'), { deltaY: -120 });
+      await act(async () => {
+        vi.advanceTimersByTime(120);
+      });
+      expect(api.playerSetVolume).toHaveBeenCalledWith(0.55);
+      expect(screen.queryByTestId('volume-popover')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('speaker glyph reflects the volume level', () => {
+    const { rerender } = render(<PlayerBar />);
+    usePlayerStore.setState({ state: state({ volume: 0 }) });
+    rerender(<PlayerBar />);
+    expect(screen.getByTestId('volume-toggle')).toHaveAttribute('data-volume-level', 'mute');
+
+    usePlayerStore.setState({ state: state({ volume: 0.3 }) });
+    rerender(<PlayerBar />);
+    expect(screen.getByTestId('volume-toggle')).toHaveAttribute('data-volume-level', 'low');
+
+    usePlayerStore.setState({ state: state({ volume: 0.8 }) });
+    rerender(<PlayerBar />);
+    expect(screen.getByTestId('volume-toggle')).toHaveAttribute('data-volume-level', 'high');
+  });
+
+  it('volume popover is mutually exclusive with the audio panels and closes on Escape', () => {
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+
+    // Opening the spectrum takes over the popover slot.
+    fireEvent.click(screen.getByTestId('volume-toggle'));
+    expect(screen.getByTestId('volume-popover')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('spectrum-toggle'));
+    expect(screen.queryByTestId('volume-popover')).not.toBeInTheDocument();
+
+    // Reopening the volume then closes the spectrum; Escape dismisses.
+    fireEvent.click(screen.getByTestId('volume-toggle'));
+    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('volume-popover')).not.toBeInTheDocument();
   });
 
   it('equalizer toggle opens a panel that loads settings, and closes again', async () => {
@@ -232,32 +337,6 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('fx-toggle'));
     expect(useArtEffectStore.getState().open).toBe(false);
     expect(screen.queryByTestId('fx-panel')).not.toBeInTheDocument();
-  });
-
-  it('volume slider commits on release', async () => {
-    vi.mocked(api.playerSetVolume).mockResolvedValue(state({ volume: 0.9 }));
-    usePlayerStore.setState({ state: state() });
-    render(<PlayerBar />);
-    const slider = screen.getByTestId('volume-slider') as HTMLInputElement;
-    fireEvent.change(slider, { target: { value: '0.9' } });
-    fireEvent.pointerUp(slider);
-    await vi.waitFor(() => expect(api.playerSetVolume).toHaveBeenCalledWith(0.9));
-  });
-
-  it('mouse wheel over the volume slider adjusts volume through the api', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.mocked(api.playerSetVolume).mockResolvedValue(state({ volume: 0.55 }));
-      usePlayerStore.setState({ state: state({ volume: 0.5 }) });
-      render(<PlayerBar />);
-      fireEvent.wheel(screen.getByTestId('volume-slider'), { deltaY: -120 });
-      await act(async () => {
-        vi.advanceTimersByTime(120);
-      });
-      expect(api.playerSetVolume).toHaveBeenCalledWith(0.55);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('seek slider commits the dragged position', async () => {

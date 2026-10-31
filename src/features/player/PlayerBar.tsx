@@ -1,6 +1,7 @@
-// Bottom transport bar: play controls, seek, volume, now-playing title.
+// Bottom transport bar: now-playing title, centered prev/play/next + seek,
+// and a right-hand tool dock (view toggles, play mode) beside the volume.
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { formatDuration } from '@/lib/format';
 import { Slider } from '@/components/ui/Slider';
 import { IconButton } from '@/components/ui/IconButton';
@@ -18,6 +19,7 @@ import { SpectrumIcon } from '@/features/player/SpectrumIcons';
 import { SpectrumPanel } from '@/features/player/SpectrumPanel';
 import { ArtEffectIcon } from '@/features/player/ArtEffectIcons';
 import { ArtEffectsPanel } from '@/features/player/ArtEffectsPanel';
+import { VolumeControl } from '@/features/player/VolumeControl';
 const MODE_LABEL_KEY: Record<
   PlayMode,
   'player.modeSequential' | 'player.repeatAll' | 'player.repeatOne' | 'player.shuffle'
@@ -35,18 +37,21 @@ export function PlayerBar() {
   const eqOpen = useEqualizerStore((s) => s.open);
   const spectrumOpen = useSpectrumStore((s) => s.open);
   const fxOpen = useArtEffectStore((s) => s.open);
-  const { toggle, next, prev, seek, setVolume, cyclePlayMode } = usePlayerStore.getState();
+  const [volumeOpen, setVolumeOpen] = useState(false);
+  const { toggle, next, prev, seek, cyclePlayMode } = usePlayerStore.getState();
   const toggleLyrics = useLyricsStore.getState().toggle;
-  // All three popovers anchor to the bar's right edge: only one may be
-  // open, so each toggle closes the other two.
+  // All four popovers anchor to the bar's right edge: only one may be
+  // open, so each toggle closes the other three.
   const toggleEq = () => openPopover('eq', !useEqualizerStore.getState().open);
   const toggleSpectrum = () =>
     openPopover('spectrum', !useSpectrumStore.getState().open);
   const toggleFx = () => openPopover('fx', !useArtEffectStore.getState().open);
-  const openPopover = (which: 'eq' | 'spectrum' | 'fx', open: boolean) => {
+  const toggleVolume = () => openPopover('volume', !volumeOpen);
+  const openPopover = (which: 'eq' | 'spectrum' | 'fx' | 'volume', open: boolean) => {
     useEqualizerStore.getState().setOpen(which === 'eq' ? open : false);
     useSpectrumStore.getState().setOpen(which === 'spectrum' ? open : false);
     useArtEffectStore.getState().setOpen(which === 'fx' ? open : false);
+    setVolumeOpen(which === 'volume' ? open : false);
   };
   // Anchors for the popovers' outside-press exclusion (the toggle buttons
   // themselves must toggle, not close-then-reopen).
@@ -82,45 +87,10 @@ export function PlayerBar() {
       {fxOpen ? <ArtEffectsPanel anchorRef={fxToggleRef} /> : null}
 
       <div className="transport">
+        {/* 2+2 symmetric cluster around the play button: play mode flanks
+            left with prev, the lyrics toggle mirrors it right with next.
+            The audio panels (EQ/spectrum/fx) live in the right-hand dock. */}
         <div className="transport-buttons">
-          <IconButton
-            label={lyricsOpen ? t('player.hideLyrics') : t('player.showLyrics')}
-            active={lyricsOpen}
-            aria-pressed={lyricsOpen}
-            onClick={toggleLyrics}
-            data-testid="lyrics-toggle"
-          >
-            <LyricsIcon />
-          </IconButton>
-          <IconButton
-            ref={eqToggleRef}
-            label={eqOpen ? t('player.hideEqualizer') : t('player.showEqualizer')}
-            active={eqOpen}
-            aria-pressed={eqOpen}
-            onClick={toggleEq}
-            data-testid="eq-toggle"
-          >
-            <EqualizerIcon />
-          </IconButton>
-          <IconButton
-            label={spectrumOpen ? t('player.hideSpectrum') : t('player.showSpectrum')}
-            active={spectrumOpen}
-            aria-pressed={spectrumOpen}
-            onClick={toggleSpectrum}
-            data-testid="spectrum-toggle"
-          >
-            <SpectrumIcon />
-          </IconButton>
-          <IconButton
-            ref={fxToggleRef}
-            label={fxOpen ? t('player.hideArtEffects') : t('player.showArtEffects')}
-            active={fxOpen}
-            aria-pressed={fxOpen}
-            onClick={toggleFx}
-            data-testid="fx-toggle"
-          >
-            <ArtEffectIcon />
-          </IconButton>
           <IconButton
             label={t(MODE_LABEL_KEY[mode])}
             active={mode !== 'sequential'}
@@ -143,6 +113,15 @@ export function PlayerBar() {
           <IconButton label={t('player.next')} onClick={() => void next()}>
             ⏭
           </IconButton>
+          <IconButton
+            label={lyricsOpen ? t('player.hideLyrics') : t('player.showLyrics')}
+            active={lyricsOpen}
+            aria-pressed={lyricsOpen}
+            onClick={toggleLyrics}
+            data-testid="lyrics-toggle"
+          >
+            <LyricsIcon />
+          </IconButton>
         </div>
         <div className="progress">
           <span className="time">{formatDuration(state.positionSecs)}</span>
@@ -160,18 +139,40 @@ export function PlayerBar() {
         </div>
       </div>
 
-      <div className="volume">
-        <span aria-hidden>🔊</span>
-        <Slider
-          aria-label={t('player.volume')}
-          data-testid="volume-slider"
-          className="volume-slider"
-          min={0}
-          max={1}
-          step={0.01}
-          wheelStep={0.05}
-          value={state.volume}
-          onCommit={(value) => void setVolume(value)}
+      <div className="bar-tools">
+        <IconButton
+          ref={eqToggleRef}
+          label={eqOpen ? t('player.hideEqualizer') : t('player.showEqualizer')}
+          active={eqOpen}
+          aria-pressed={eqOpen}
+          onClick={toggleEq}
+          data-testid="eq-toggle"
+        >
+          <EqualizerIcon />
+        </IconButton>
+        <IconButton
+          label={spectrumOpen ? t('player.hideSpectrum') : t('player.showSpectrum')}
+          active={spectrumOpen}
+          aria-pressed={spectrumOpen}
+          onClick={toggleSpectrum}
+          data-testid="spectrum-toggle"
+        >
+          <SpectrumIcon />
+        </IconButton>
+        <IconButton
+          ref={fxToggleRef}
+          label={fxOpen ? t('player.hideArtEffects') : t('player.showArtEffects')}
+          active={fxOpen}
+          aria-pressed={fxOpen}
+          onClick={toggleFx}
+          data-testid="fx-toggle"
+        >
+          <ArtEffectIcon />
+        </IconButton>
+        <VolumeControl
+          open={volumeOpen}
+          onToggle={toggleVolume}
+          onClose={() => openPopover('volume', false)}
         />
       </div>
 

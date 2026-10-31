@@ -979,7 +979,10 @@ button {
 .player-bar {
   grid-area: player;
   display: grid;
-  grid-template-columns: 220px 1fr 180px;
+  /* Columns: now-playing | centered transport | tool dock (panels +
+     volume). The volume lives in the dock as a popover, so no fixed
+     180px column is spent on it anymore. */
+  grid-template-columns: 220px 1fr auto;
   align-items: center;
   gap: 16px;
   min-height: 72px;
@@ -1025,6 +1028,14 @@ button {
   gap: 10px;
 }
 
+/* Right-hand tool dock: the three audio-panel toggles plus the volume
+   button; play mode and lyrics live in the centered 2+2 cluster. */
+.bar-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .progress {
   display: flex;
   align-items: center;
@@ -1042,16 +1053,6 @@ button {
   font-variant-numeric: tabular-nums;
   min-width: 40px;
   text-align: center;
-}
-
-.volume {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.volume .slider {
-  width: 110px;
 }
 
 .player-error {
@@ -1284,6 +1285,40 @@ button {
 .fx-option:focus-visible {
   outline: 2px solid var(--accent-2);
   outline-offset: 1px;
+}
+
+/* ---------- volume popover ---------- */
+
+/* Same popover geometry as the EQ / spectrum / fx panels (all anchor to
+   the bar's right edge and are mutually exclusive). The vertical fader
+   reuses the eq-band-slider writing-mode trick for WebView2. */
+.volume-popover {
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 10px);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.volume-slider {
+  width: 22px;
+  height: 140px;
+  writing-mode: vertical-lr;
+  direction: rtl;
+}
+
+.volume-value {
+  font-size: 11px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- art effects background (lyrics page) ---------- */
