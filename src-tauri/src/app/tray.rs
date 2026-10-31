@@ -7,7 +7,8 @@
 //! split used for auto playlist names.
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tauri::image::Image;
+use tauri::menu::{IconMenuItem, Menu, MenuEvent, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
 
@@ -15,6 +16,7 @@ use super::commands::emit_state;
 use super::dto::{PlaybackStatus, PlayerStateDto};
 use super::service::{PlayerError, PlayerService};
 use super::state::SharedService;
+use super::tray_icons::{menu_icon, toggle_glyph, Glyph};
 use crate::domain::track::Track;
 
 /// Main window label (tauri.conf.json `app.windows[0].label`).
@@ -118,16 +120,21 @@ fn tooltip_text(state: &PlayerStateDto) -> String {
 /// Owns the tray icon and menu item handles, mirroring the last applied
 /// player state and labels so either can change independently (state from
 /// `emit_state`, labels from `tray_set_labels`) and re-render the menu.
+/// Items are icon menu items so every row carries a glyph (drawn in
+/// `tray_icons`, no binary assets).
 pub struct TrayController {
     tray: TrayIcon<Wry>,
-    now_playing: MenuItem<Wry>,
-    previous: MenuItem<Wry>,
-    toggle: MenuItem<Wry>,
-    next: MenuItem<Wry>,
-    show: MenuItem<Wry>,
-    quit: MenuItem<Wry>,
+    now_playing: IconMenuItem<Wry>,
+    previous: IconMenuItem<Wry>,
+    toggle: IconMenuItem<Wry>,
+    next: IconMenuItem<Wry>,
+    show: IconMenuItem<Wry>,
+    quit: IconMenuItem<Wry>,
     labels: TrayLabels,
     state: PlayerStateDto,
+    /// Pre-rasterized glyphs; the toggle row swaps between play and pause.
+    icon_toggle_on: Image<'static>,
+    icon_toggle_off: Image<'static>,
 }
 
 impl TrayController {
@@ -139,13 +146,56 @@ impl TrayController {
         labels: TrayLabels,
         state: PlayerStateDto,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let now_playing = MenuItem::with_id(app, MENU_NOW_PLAYING, "", false, None::<&str>)?;
-        let previous = MenuItem::with_id(app, MENU_PREVIOUS, &labels.previous, true, None::<&str>)?;
-        let toggle =
-            MenuItem::with_id(app, MENU_TOGGLE, toggle_label(&labels, state.status), true, None::<&str>)?;
-        let next = MenuItem::with_id(app, MENU_NEXT, &labels.next, true, None::<&str>)?;
-        let show = MenuItem::with_id(app, MENU_SHOW, &labels.show, true, None::<&str>)?;
-        let quit = MenuItem::with_id(app, MENU_QUIT, &labels.quit, true, None::<&str>)?;
+        // The icon argument precedes the accelerator in IconMenuItem::with_id.
+        let icon = |glyph: Glyph| Some(menu_icon(glyph));
+        let now_playing = IconMenuItem::with_id(
+            app,
+            MENU_NOW_PLAYING,
+            "",
+            false,
+            icon(Glyph::Note),
+            None::<&str>,
+        )?;
+        let previous = IconMenuItem::with_id(
+            app,
+            MENU_PREVIOUS,
+            &labels.previous,
+            true,
+            icon(Glyph::Previous),
+            None::<&str>,
+        )?;
+        let toggle = IconMenuItem::with_id(
+            app,
+            MENU_TOGGLE,
+            toggle_label(&labels, state.status),
+            true,
+            Some(menu_icon(toggle_glyph(state.status == PlaybackStatus::Playing))),
+            None::<&str>,
+        )?;
+        let next = IconMenuItem::with_id(
+            app,
+            MENU_NEXT,
+            &labels.next,
+            true,
+            icon(Glyph::Next),
+            None::<&str>,
+        )?;
+        let show = IconMenuItem::with_id(
+            app,
+            MENU_SHOW,
+            &labels.show,
+            true,
+            icon(Glyph::Show),
+            None::<&str>,
+        )?;
+        let quit = IconMenuItem::with_id(
+            app,
+            MENU_QUIT,
+            &labels.quit,
+            true,
+            icon(Glyph::Quit),
+            None::<&str>,
+        )?;
         let separator_a = PredefinedMenuItem::separator(app)?;
         let separator_b = PredefinedMenuItem::separator(app)?;
         let separator_c = PredefinedMenuItem::separator(app)?;
@@ -187,6 +237,8 @@ impl TrayController {
             quit,
             labels,
             state,
+            icon_toggle_on: menu_icon(Glyph::Pause),
+            icon_toggle_off: menu_icon(Glyph::Play),
         };
         controller.refresh();
         Ok(controller)
@@ -204,13 +256,21 @@ impl TrayController {
         self.refresh();
     }
 
-    /// Re-applies every text. Failures are cosmetic (a stale label until the
-    /// next refresh) and native set_text has no actionable error handling,
-    /// so they are logged at most for the tooltip and ignored otherwise.
+    /// Re-applies every text and the toggle glyph. Failures are cosmetic (a
+    /// stale label until the next refresh) and native set_text/set_icon
+    /// have no actionable error handling, so they are logged at most for
+    /// the tooltip and ignored otherwise.
     fn refresh(&self) {
         let _ = self.now_playing.set_text(now_playing_label(&self.labels, &self.state));
         let _ = self.previous.set_text(self.labels.previous.clone());
         let _ = self.toggle.set_text(toggle_label(&self.labels, self.state.status));
+        let playing = self.state.status == PlaybackStatus::Playing;
+        let _ = self.toggle.set_icon(Some(if playing {
+            // Image is a cheap 1KB Cow clone; state changes are rare.
+            self.icon_toggle_on.clone()
+        } else {
+            self.icon_toggle_off.clone()
+        }));
         let _ = self.next.set_text(self.labels.next.clone());
         let _ = self.show.set_text(self.labels.show.clone());
         let _ = self.quit.set_text(self.labels.quit.clone());
@@ -317,11 +377,14 @@ mod tests {
         }
     }
 
+    /// Samples stay far below any clamp budget: these tests pin the
+    /// *formatting* (separator, fallback, status glyph), not the clamp -
+    /// see the clamp tests for that behavior.
     fn track(artist: Option<&str>) -> Track {
         Track {
             id: "C:/lib/a.mp3".into(),
-            title: "Alpha".into(),
-            artist: artist.map(Into::into),
+            title: "A".into(),
+            artist: artist.map(|a| a.to_uppercase()),
             ..Track::from_stem(std::path::Path::new("C:/lib/a.mp3"), 1)
         }
     }
@@ -337,11 +400,11 @@ mod tests {
     #[test]
     fn now_playing_label_formats_track_and_falls_back() {
         let labels = TrayLabels::default();
-        let with_artist = state(PlaybackStatus::Playing, Some(track(Some("Nova"))));
-        assert_eq!(now_playing_label(&labels, &with_artist), "Alpha — Nova");
+        let with_artist = state(PlaybackStatus::Playing, Some(track(Some("n"))));
+        assert_eq!(now_playing_label(&labels, &with_artist), "A — N");
 
         let no_artist = state(PlaybackStatus::Playing, Some(track(None)));
-        assert_eq!(now_playing_label(&labels, &no_artist), "Alpha");
+        assert_eq!(now_playing_label(&labels, &no_artist), "A");
 
         let idle = state(PlaybackStatus::Stopped, None);
         assert_eq!(now_playing_label(&labels, &idle), "Nothing playing");
@@ -349,11 +412,11 @@ mod tests {
 
     #[test]
     fn tooltip_reflects_playback_status() {
-        let playing = state(PlaybackStatus::Playing, Some(track(Some("Nova"))));
-        assert_eq!(tooltip_text(&playing), "▶ Alpha — Nova");
+        let playing = state(PlaybackStatus::Playing, Some(track(Some("n"))));
+        assert_eq!(tooltip_text(&playing), "▶ A — N");
 
         let paused = state(PlaybackStatus::Paused, Some(track(None)));
-        assert_eq!(tooltip_text(&paused), "⏸ Alpha");
+        assert_eq!(tooltip_text(&paused), "⏸ A");
 
         let idle = state(PlaybackStatus::Stopped, None);
         assert_eq!(tooltip_text(&idle), "LuMusic");
