@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::domain::lyrics::Lyrics;
 use crate::domain::queue::RepeatMode;
-use crate::domain::track::Track;
+use crate::domain::track::{Track, TrackId};
 
 /// Playback status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -35,11 +35,29 @@ pub struct PlayerStateDto {
 }
 
 /// Throttled progress tick (event `player://progress`).
-#[derive(Debug, Clone, Copy, Serialize)]
+///
+/// `track_id` identifies the track the numbers belong to: a tick serialized
+/// right before a track switch can be delivered to the webview *after* the
+/// switch's fresh state (events and invoke responses take different
+/// channels), and applying it would rewind the seek bar into the previous
+/// track's position. The frontend drops ticks whose track no longer plays.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressDto {
+    pub track_id: Option<TrackId>,
     pub position_secs: f64,
     pub duration_secs: Option<f64>,
+}
+
+impl ProgressDto {
+    /// Progress projection of a full player snapshot.
+    pub fn of(state: &PlayerStateDto) -> Self {
+        Self {
+            track_id: state.current_track.as_ref().map(|t| t.id.clone()),
+            position_secs: state.position_secs,
+            duration_secs: state.duration_secs,
+        }
+    }
 }
 
 /// Scan progress tick (event `library://scan-progress`).
@@ -82,5 +100,45 @@ impl From<(Option<String>, Lyrics)> for LyricsDto {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::queue::RepeatMode;
+
+    fn state(track: Option<Track>) -> PlayerStateDto {
+        PlayerStateDto {
+            status: crate::app::dto::PlaybackStatus::Playing,
+            current_track: track,
+            queue_position: Some(0),
+            queue_len: 1,
+            position_secs: 12.5,
+            duration_secs: Some(200.0),
+            volume: 0.5,
+            shuffle: false,
+            repeat: RepeatMode::Off,
+        }
+    }
+
+    /// Pins the camelCase shape of the progress tick and, crucially, the
+    /// track identity it carries: without it the frontend cannot tell a
+    /// stale pre-switch tick from a live one.
+    #[test]
+    fn progress_dto_carries_the_tracks_identity() {
+        let dto = ProgressDto::of(&state(Some(Track::from_stem(
+            std::path::Path::new("C:/lib/a.mp3"),
+            1,
+        ))));
+        assert_eq!(dto.track_id.as_deref(), Some("C:/lib/a.mp3"));
+        assert_eq!(dto.position_secs, 12.5);
+        assert_eq!(dto.duration_secs, Some(200.0));
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["trackId"], "C:/lib/a.mp3");
+        assert_eq!(json["positionSecs"], 12.5);
+
+        // Idle player: identity is null, not a stale id.
+        assert_eq!(ProgressDto::of(&state(None)).track_id, None);
     }
 }

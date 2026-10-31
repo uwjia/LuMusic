@@ -25,12 +25,19 @@ export function Slider({ value, onCommit, wheelStep, className = '', ...rest }: 
   const shown = dragValue ?? value;
   const wheelTimer = useRef<number | null>(null);
 
-  // Drop the local override when the committed value catches up.
+  // Drop the local override when the committed value catches up. "Catches
+  // up" must be a rounding bucket, not exact equality: the backend seek
+  // lands a frame short of its target and volume crosses an f32 boundary,
+  // so an exact match never fires — the thumb then stays pinned at the
+  // dragged value and ignores later updates (seek bar refusing to return
+  // to 0 on next/previous, frozen while playing). Half a step = same
+  // setting on the slider's own grid.
+  const tolerance = Math.abs(Number(rest.step ?? 1)) / 2 || Number.EPSILON;
   useEffect(() => {
-    if (dragValue != null && Math.abs(dragValue - value) < Number.EPSILON) {
+    if (dragValue != null && Math.abs(dragValue - value) <= tolerance) {
       setDragValue(null);
     }
-  }, [value, dragValue]);
+  }, [value, dragValue, tolerance]);
 
   useEffect(
     () => () => {

@@ -12,11 +12,19 @@ export function usePlayerEvents(): void {
     const unsubs = [
       api.onPlayerState((state) => usePlayerStore.getState().applyState(state)),
       api.onProgress((p) => {
-        // Progress updates only move the position/duration fields.
         const store = usePlayerStore.getState();
-        if (store.state) {
-          store.applyState({ ...store.state, ...p });
-        }
+        if (!store.state) return;
+        // A tick serialized just before a track switch can arrive after the
+        // switch's fresh state (events and invoke responses travel on
+        // different channels); applying it would rewind the seek bar into
+        // the previous track's position instead of restarting at 0. The
+        // track id makes such ticks recognizable and droppable.
+        if (p.trackId !== (store.state.currentTrack?.id ?? null)) return;
+        store.applyState({
+          ...store.state,
+          positionSecs: p.positionSecs,
+          durationSecs: p.durationSecs,
+        });
       }),
       api.onScanProgress((p) => useLibraryStore.getState().applyScanProgress(p)),
       api.onLibraryUpdated(() => {

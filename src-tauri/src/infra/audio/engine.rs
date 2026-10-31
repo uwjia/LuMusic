@@ -64,6 +64,10 @@ pub trait AudioEngine: Send {
     }
     /// Seeks within the current track (no-op when nothing is loaded).
     fn seek(&mut self, secs: f64) -> Result<(), AudioError>;
+    /// Position of the source opened by the most recent successful
+    /// `load_and_play` / `load_paused` / `seek`. Callers read this the
+    /// instant those calls return, so the value must already reflect the
+    /// fresh source — never the previous (now frozen) one.
     fn position_secs(&self) -> f64;
     fn volume(&self) -> f32;
     /// True when a track is loaded and the user paused it.
@@ -99,7 +103,9 @@ enum Command {
     },
     Seek {
         secs: f64,
-        reply: Reply<Result<(), AudioError>>,
+        /// `None` in the payload = "nothing was loaded, seek was a no-op"
+        /// (the proxy then keeps the previous tracker).
+        reply: Reply<Result<Option<Arc<PosTracker>>, AudioError>>,
     },
     Query {
         reply: Reply<EngineSnapshot>,
@@ -107,6 +113,11 @@ enum Command {
 }
 
 /// Point-in-time state of the audio thread, used to answer trait queries.
+///
+/// Deliberately carries **no** position: the tracker swap happens inside
+/// the thread, but callers observe `position_secs()` the moment a
+/// synchronous open/seek returns — that read goes through the proxy-owned
+/// [`CurrentTracker`] instead, so it can never lag a command reply.
 #[derive(Debug, Clone, Default)]
 struct EngineSnapshot {
     paused: bool,
@@ -114,7 +125,36 @@ struct EngineSnapshot {
     volume: f32,
     sample_rate: u32,
     current_path: Option<PathBuf>,
-    tracker: Option<Arc<PosTracker>>,
+}
+
+/// Tracker of the most recently opened source, owned by the engine proxy.
+///
+/// `PlayerService::load_track` persists and reports the position right
+/// after `load_and_play` returns; when the tracker swap lived only inside
+/// the audio thread (published after the reply), that read could still see
+/// the *previous* track's frozen tracker — surfacing as "next/previous
+/// didn't restart from the beginning". Feeding the proxy from the command
+/// reply makes the observation order deterministic.
+#[derive(Default)]
+struct CurrentTracker(Mutex<Option<Arc<PosTracker>>>);
+
+impl CurrentTracker {
+    fn set(&self, tracker: Arc<PosTracker>) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(tracker);
+    }
+
+    fn clear(&self) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn position_secs(&self) -> f64 {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|t| t.position_secs())
+            .unwrap_or(0.0)
+    }
 }
 
 /// State owned by the audio thread. Never shared directly.
@@ -125,7 +165,6 @@ struct DeviceState {
     volume: f32,
     paused: bool,
     path: Option<PathBuf>,
-    tracker: Option<Arc<PosTracker>>,
     /// Sample rate of the currently loaded source (0 = nothing loaded);
     /// drives spectrum bin→frequency mapping.
     sample_rate: u32,
@@ -144,7 +183,6 @@ impl DeviceState {
             volume: self.volume,
             sample_rate: self.sample_rate,
             current_path: self.path.clone(),
-            tracker: self.tracker.clone(),
         }
     }
 
@@ -169,7 +207,6 @@ impl DeviceState {
         ));
         // Replacing the previous sink drops (and therefore stops) it.
         self.sink = Some(sink);
-        self.tracker = Some(tracker.clone());
         self.path = Some(path.to_path_buf());
         self.paused = false;
         Ok(tracker)
@@ -179,7 +216,10 @@ impl DeviceState {
 /// `Send` proxy to the audio-owning thread.
 pub struct RodioEngine {
     tx: Sender<Command>,
-    snapshot: Arc<Mutex<EngineSnapshot>>,
+    /// Tracker of the source opened by the last successful open/seek;
+    /// see [`CurrentTracker`] for why the proxy (not the audio thread)
+    /// owns this swap.
+    current: CurrentTracker,
     /// Drains the audio thread's tap into display frames; cheap enough to
     /// lock per poller tick (~20 Hz).
     analyzer: Mutex<SpectrumAnalyzer>,
@@ -191,8 +231,6 @@ impl RodioEngine {
     /// The stream must be created *inside* the thread because it is not
     /// `Send`; a handshake channel reports whether the device opened.
     pub fn new() -> Result<Self, AudioError> {
-        let snapshot = Arc::new(Mutex::new(EngineSnapshot::default()));
-        let thread_snapshot = snapshot.clone();
         let (tx, rx) = mpsc::channel::<Command>();
         let (init_tx, init_rx) = mpsc::channel::<Result<(), AudioError>>();
         let eq = Arc::new(SharedEq::new(EqSettings::default()));
@@ -216,19 +254,18 @@ impl RodioEngine {
                     volume: 0.8,
                     paused: false,
                     path: None,
-                    tracker: None,
                     sample_rate: 0,
                     eq: thread_eq,
                     spectrum_tap: thread_tap,
                 };
                 let _ = init_tx.send(Ok(()));
-                audio_loop(state, rx, thread_snapshot);
+                audio_loop(state, rx);
             })
             .map_err(|_| AudioError::NoDevice)?;
         init_rx.recv().map_err(|_| AudioError::NoDevice)??;
         Ok(Self {
             tx,
-            snapshot,
+            current: CurrentTracker::default(),
             analyzer: Mutex::new(SpectrumAnalyzer::new(tap)),
         })
     }
@@ -244,6 +281,12 @@ impl RodioEngine {
     }
 
     /// Shared implementation of `load_and_play` / `load_paused`.
+    ///
+    /// On success the fresh tracker is adopted *before* returning, so the
+    /// caller's immediate `position_secs()` read already sees 0.0 (or the
+    /// seek target) instead of the previous track's frozen position. On
+    /// error the audio thread kept the old sink playing, so the old
+    /// tracker stays — matching what is actually audible.
     fn open(&self, path: &Path, at_secs: Option<f64>, start_paused: bool) -> Result<(), AudioError> {
         match self.call(|reply| Command::Open {
             path: path.to_path_buf(),
@@ -251,22 +294,20 @@ impl RodioEngine {
             start_paused,
             reply,
         }) {
-            Some(result) => result.map(|_| ()),
+            Some(Ok(tracker)) => {
+                self.current.set(tracker);
+                Ok(())
+            }
+            Some(Err(err)) => Err(err),
             None => Err(AudioError::NoDevice), // audio thread is gone
         }
     }
 }
 
-/// Command loop running on the audio thread.
-fn audio_loop(
-    mut state: DeviceState,
-    rx: mpsc::Receiver<Command>,
-    snapshot: Arc<Mutex<EngineSnapshot>>,
-) {
-    let publish = |state: &DeviceState, snapshot: &Arc<Mutex<EngineSnapshot>>| {
-        let snap = state.snapshot();
-        *snapshot.lock().unwrap_or_else(|e| e.into_inner()) = snap;
-    };
+/// Command loop running on the audio thread. Every reply already carries
+/// the resulting state (tracker / snapshot), so the loop keeps no shared
+/// side channel — nothing here can be observed stale by a caller.
+fn audio_loop(mut state: DeviceState, rx: mpsc::Receiver<Command>) {
     while let Ok(command) = rx.recv() {
         match command {
             Command::Open { path, at_secs, start_paused, reply } => {
@@ -295,7 +336,6 @@ fn audio_loop(
             }
             Command::Stop { reply } => {
                 state.sink = None; // dropping stops playback
-                state.tracker = None;
                 state.path = None;
                 state.paused = false;
                 let _ = reply.send(());
@@ -313,8 +353,10 @@ fn audio_loop(
             }
             Command::Seek { secs, reply } => {
                 let result = match state.path.clone() {
-                    Some(path) => state.open_at(&path, Some(secs)).map(|_| ()),
-                    None => Ok(()), // nothing loaded: seek is a no-op
+                    // Reopening is the seek: a new source positioned at
+                    // `secs`, wrapped in a fresh sink (EQ/spectrum intact).
+                    Some(path) => state.open_at(&path, Some(secs)).map(Some),
+                    None => Ok(None), // nothing loaded: seek is a no-op
                 };
                 let _ = reply.send(result);
             }
@@ -322,7 +364,6 @@ fn audio_loop(
                 let _ = reply.send(state.snapshot());
             }
         }
-        publish(&state, &snapshot);
     }
 }
 
@@ -345,6 +386,7 @@ impl AudioEngine for RodioEngine {
 
     fn stop(&mut self) {
         let _ = self.call(|reply| Command::Stop { reply });
+        self.current.clear();
     }
 
     fn set_volume(&mut self, volume: f32) {
@@ -366,19 +408,20 @@ impl AudioEngine for RodioEngine {
 
     fn seek(&mut self, secs: f64) -> Result<(), AudioError> {
         match self.call(|reply| Command::Seek { secs, reply }) {
-            Some(result) => result,
+            // Adopt the re-opened source's tracker before returning, so an
+            // immediately following read reports the seek target.
+            Some(Ok(Some(tracker))) => {
+                self.current.set(tracker);
+                Ok(())
+            }
+            Some(Ok(None)) => Ok(()), // nothing was loaded: no-op
+            Some(Err(err)) => Err(err),
             None => Err(AudioError::NoDevice),
         }
     }
 
     fn position_secs(&self) -> f64 {
-        self.snapshot
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .tracker
-            .as_ref()
-            .map(|t| t.position_secs())
-            .unwrap_or(0.0)
+        self.current.position_secs()
     }
 
     fn volume(&self) -> f32 {
@@ -484,6 +527,58 @@ impl AudioEngine for NullEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::audio::symphonia_source::source_from_bytes;
+    use std::io::Cursor;
+
+    /// Minimal stereo 16-bit WAV of `seconds` length, in memory.
+    fn wav_bytes(seconds: f64) -> Vec<u8> {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 44_100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = hound::WavWriter::new(&mut cursor, spec).unwrap();
+            let frames = (seconds * spec.sample_rate as f64) as u32;
+            for i in 0..frames {
+                let value = ((i as f32 / 20.0).sin() * 8000.0) as i16;
+                writer.write_sample(value).unwrap();
+                writer.write_sample(value).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        cursor.into_inner()
+    }
+
+    /// Regression pin for "next/previous didn't restart from the beginning":
+    /// the position read must come from the tracker of the most recent
+    /// open/seek the moment that call returns — never from the previous
+    /// track's (by then frozen) tracker. `RodioEngine` needs a real output
+    /// device, so the pin targets the proxy-owned swap it delegates to.
+    #[test]
+    fn position_follows_the_newest_source_not_the_previous_one() {
+        let current = CurrentTracker::default();
+
+        // A source that already "played" for a while.
+        let mut played = source_from_bytes(wav_bytes(1.0), "old.wav").unwrap();
+        played.seek_by_time(0.5).unwrap();
+        current.set(played.position_tracker());
+        assert!(
+            current.position_secs() > 0.4,
+            "precondition: old tracker is mid-track"
+        );
+
+        // Switching tracks adopts the fresh source at 0.0 instantly.
+        let fresh = source_from_bytes(wav_bytes(1.0), "new.wav").unwrap();
+        current.set(fresh.position_tracker());
+        assert_eq!(current.position_secs(), 0.0);
+
+        // Stopping releases the tracker; no source, no position.
+        current.clear();
+        assert_eq!(current.position_secs(), 0.0);
+    }
 
     #[test]
     fn audio_error_converts_from_source_error() {

@@ -208,11 +208,7 @@ fn poll_loop(app: tauri::AppHandle<Wry>, service: SharedService) {
             if let Ok(guard) = service.lock() {
                 let state = guard.state();
                 if state.status == app::dto::PlaybackStatus::Playing {
-                    let progress = ProgressDto {
-                        position_secs: state.position_secs,
-                        duration_secs: state.duration_secs,
-                    };
-                    let _ = app.emit(ev::EVENT_PLAYER_PROGRESS, progress);
+                    let _ = app.emit(ev::EVENT_PLAYER_PROGRESS, ProgressDto::of(&state));
                 }
             }
         }

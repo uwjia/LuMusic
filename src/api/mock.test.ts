@@ -112,6 +112,33 @@ describe('mock auto playlists', () => {
     expect(after.status).toBe('playing');
     expect(after.positionSecs).toBeLessThan(after.durationSecs ?? Infinity);
   });
+
+  // Mirrors the backend: every progress tick names the track it belongs to,
+  // and next/previous restart the position at 0 — together the UI can drop
+  // pre-switch ticks instead of rewinding the seek bar.
+  it('next restarts at 0 and tags progress ticks with the playing track', async () => {
+    // Stop first: it re-arms the singleton's ticker inside this test's own
+    // fake clock (see playerStop), so the interval actually fires here.
+    await mockApi.playerStop();
+    const tracks = await mockApi.playlistGetTracks('auto:root');
+    await mockApi.playerLoad(tracks.map((t) => t.id), 0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await mockApi.playerState()).positionSecs).toBeGreaterThan(0);
+
+    const ticks: { trackId: string | null; positionSecs: number }[] = [];
+    const unsubscribe = mockApi.onProgress((p) =>
+      ticks.push({ trackId: p.trackId, positionSecs: p.positionSecs }),
+    );
+    const after = await mockApi.playerNext();
+    expect(after.currentTrack?.id).toBe(tracks[1].id);
+    expect(after.positionSecs).toBe(0); // next restarts from the beginning
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((t) => t.trackId === tracks[1].id)).toBe(true);
+    expect(ticks[0].positionSecs).toBe(0.25);
+    unsubscribe();
+  });
 });
 
 describe('mock settings + tray seam', () => {

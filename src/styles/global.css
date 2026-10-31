@@ -636,18 +636,27 @@ button {
   overflow-y: auto;
 }
 
+/* Each card takes a full row; the column is capped so rows stay readable
+   on very wide windows while using far more space than a fixed 680px. */
 .settings-page .page-header {
-  width: min(680px, 100%);
+  width: 100%;
+  max-width: 1160px;
   margin-inline: auto;
+  /* Matches the card column's inner padding so the title sits flush
+     with the cards, not the window edge. */
+  padding-inline: 24px;
 }
 
 .settings-scroll {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(680px, 100%);
+  width: 100%;
+  max-width: 1160px;
   margin-inline: auto;
-  padding: 2px 0 16px;
+  /* Side breathing room for narrow windows; on wide windows the 1160px
+     cap plus centering already leaves generous margins. */
+  padding: 2px 24px 16px;
 }
 
 .settings-card {

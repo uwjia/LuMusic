@@ -6,6 +6,7 @@ import type {
   Lyrics,
   PlayerState,
   Playlist,
+  ProgressPayload,
   ScanProgress,
   ScanSummary,
   Settings,
@@ -62,7 +63,7 @@ export interface PlayerApi {
 
   // events
   onPlayerState(cb: (state: PlayerState) => void): Unsubscribe;
-  onProgress(cb: (p: { positionSecs: number; durationSecs: number | null }) => void): Unsubscribe;
+  onProgress(cb: (p: ProgressPayload) => void): Unsubscribe;
   onScanProgress(cb: (p: ScanProgress) => void): Unsubscribe;
   onLibraryUpdated(cb: (summary: ScanSummary) => void): Unsubscribe;
   /** Spectrum frames (~20 Hz, only while playing). */

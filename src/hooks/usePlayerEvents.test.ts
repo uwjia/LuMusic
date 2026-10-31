@@ -65,7 +65,9 @@ describe('usePlayerEvents', () => {
   it('merges progress ticks into the current state', () => {
     renderHook(() => usePlayerEvents());
     act(() => handlers.get('state')!(idleState));
-    act(() => handlers.get('progress')!({ positionSecs: 12.5, durationSecs: 100 }));
+    act(() =>
+      handlers.get('progress')!({ trackId: null, positionSecs: 12.5, durationSecs: 100 }),
+    );
     expect(usePlayerStore.getState().state).toEqual(
       expect.objectContaining({ positionSecs: 12.5, durationSecs: 100 }),
     );
@@ -73,8 +75,42 @@ describe('usePlayerEvents', () => {
 
   it('ignores progress ticks before the first state snapshot', () => {
     renderHook(() => usePlayerEvents());
-    act(() => handlers.get('progress')!({ positionSecs: 5, durationSecs: 10 }));
+    act(() =>
+      handlers.get('progress')!({ trackId: null, positionSecs: 5, durationSecs: 10 }),
+    );
     expect(usePlayerStore.getState().state).toBeNull();
+  });
+
+  // Regression pin: a tick serialized before a track switch can arrive in
+  // the webview after the switch's fresh state (events and invoke responses
+  // travel on different channels). Applying it rewound the seek bar into
+  // the previous track's position — "next/previous didn't restart at 0".
+  it('drops progress ticks that belong to the previous track', () => {
+    const trackA = { id: 'a', title: 'A' } as never;
+    const trackB = { id: 'b', title: 'B' } as never;
+    renderHook(() => usePlayerEvents());
+    act(() =>
+      handlers.get('state')!({ ...idleState, currentTrack: trackA, positionSecs: 137 }),
+    );
+    // Fresh state from playerNext: track B restarted at 0.
+    act(() =>
+      handlers.get('state')!({ ...idleState, currentTrack: trackB, positionSecs: 0 }),
+    );
+    // Stale tick for track A lands last: must be ignored, not applied.
+    act(() =>
+      handlers.get('progress')!({ trackId: 'a', positionSecs: 137.25, durationSecs: 200 }),
+    );
+    expect(usePlayerStore.getState().state).toEqual(
+      expect.objectContaining({ currentTrack: trackB, positionSecs: 0 }),
+    );
+
+    // A live tick for the current track still applies.
+    act(() =>
+      handlers.get('progress')!({ trackId: 'b', positionSecs: 0.25, durationSecs: 180 }),
+    );
+    expect(usePlayerStore.getState().state).toEqual(
+      expect.objectContaining({ positionSecs: 0.25, durationSecs: 180 }),
+    );
   });
 
   it('feeds scan progress and reloads the library on update', () => {

@@ -11,6 +11,7 @@ import type {
   Lyrics,
   PlayerState,
   Playlist,
+  ProgressPayload,
   RepeatMode,
   ScanProgress,
   ScanSummary,
@@ -98,7 +99,7 @@ class MockApi implements PlayerApi {
   private repeat: RepeatMode = 'off';
 
   private stateEvents = emitter<PlayerState>();
-  private progressEvents = emitter<{ positionSecs: number; durationSecs: number | null }>();
+  private progressEvents = emitter<ProgressPayload>();
   private scanProgressEvents = emitter<ScanProgress>();
   private libraryEvents = emitter<ScanSummary>();
   private spectrumEvents = emitter<SpectrumFrame>();
@@ -151,7 +152,10 @@ class MockApi implements PlayerApi {
       this.spectrumEvents.emit([...this.spectrumState]);
       const duration = this.snapshot().durationSecs ?? Number.POSITIVE_INFINITY;
       this.positionSecs += 0.25;
+      // Mirrors the backend tick: numbers are tagged with the track they
+      // belong to so the UI can drop ticks that predate a track switch.
       this.progressEvents.emit({
+        trackId: this.snapshot().currentTrack?.id ?? null,
         positionSecs: this.positionSecs,
         durationSecs: this.snapshot().durationSecs,
       });
@@ -310,6 +314,14 @@ class MockApi implements PlayerApi {
   async playerStop() {
     this.status = 'stopped';
     this.positionSecs = 0;
+    // Drop the ticker (nothing to report while stopped); the next play
+    // re-arms it. This also keeps the shared singleton re-armable across
+    // tests, where each test installs a fresh fake clock that would
+    // otherwise orphan an interval created by a previous test.
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
     this.publish();
     return this.snapshot();
   }
@@ -470,7 +482,7 @@ class MockApi implements PlayerApi {
     return this.stateEvents.on(cb);
   }
 
-  onProgress(cb: (p: { positionSecs: number; durationSecs: number | null }) => void) {
+  onProgress(cb: (p: ProgressPayload) => void) {
     return this.progressEvents.on(cb);
   }
 

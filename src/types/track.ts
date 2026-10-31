@@ -103,6 +103,8 @@ export type SpectrumFrame = number[];
 export const SPECTRUM_BARS = 24;
 
 export interface ProgressPayload {
+  /** Track the numbers belong to; lets the bridge drop stale pre-switch ticks. */
+  trackId: string | null;
   positionSecs: number;
   durationSecs: number | null;
 }

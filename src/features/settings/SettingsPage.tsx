@@ -68,31 +68,6 @@ export function SettingsPage() {
         <div className="settings-card">
           <div className="settings-card-head">
             <span className="settings-icon">
-              <LanguagesIcon />
-            </span>
-            <div>
-              <h3>{t('settings.language')}</h3>
-              <p className="muted">{t('settings.languageHint')}</p>
-            </div>
-          </div>
-          <div className="language-switch" role="group" aria-label={t('settings.language')}>
-            {LOCALES.map((l) => (
-              <Button
-                key={l}
-                variant={l === locale ? 'primary' : 'ghost'}
-                aria-pressed={l === locale}
-                onClick={() => setLocale(l)}
-                data-testid={`locale-${l}`}
-              >
-                {LOCALE_NAMES[l]}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        <div className="settings-card">
-          <div className="settings-card-head">
-            <span className="settings-icon">
               <MusicIcon />
             </span>
             <div>
@@ -180,6 +155,31 @@ export function SettingsPage() {
               ) : null}
             </div>
           ) : null}
+        </div>
+
+        <div className="settings-card">
+          <div className="settings-card-head">
+            <span className="settings-icon">
+              <LanguagesIcon />
+            </span>
+            <div>
+              <h3>{t('settings.language')}</h3>
+              <p className="muted">{t('settings.languageHint')}</p>
+            </div>
+          </div>
+          <div className="language-switch" role="group" aria-label={t('settings.language')}>
+            {LOCALES.map((l) => (
+              <Button
+                key={l}
+                variant={l === locale ? 'primary' : 'ghost'}
+                aria-pressed={l === locale}
+                onClick={() => setLocale(l)}
+                data-testid={`locale-${l}`}
+              >
+                {LOCALE_NAMES[l]}
+              </Button>
+            ))}
+          </div>
         </div>
 
         <div className="settings-card">
