@@ -842,34 +842,66 @@ button {
 
 /* ---------- lyrics page ---------- */
 
-/* Header stays over a centered column so long file paths still truncate. */
+/* Header stays over a centered column so long file paths still truncate.
+   The column and its fonts scale with the viewport (like the lines below)
+   so a maximized window fills the space instead of hugging a 720px strip. */
 .lyrics-page .page-header {
-  width: min(720px, 100%);
+  width: min(1000px, 100%);
   margin-inline: auto;
 }
 
+/* Header rows: stacked with breathing room instead of glued lines. */
 .lyrics-meta {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .lyrics-track {
   margin: 0;
+  /* ~19px at 1200w, ~26px at 2560w; 18px floor keeps small windows as-is. */
+  font-size: clamp(18px, 0.5vw + 13px, 26px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .lyrics-artist {
-  font-size: 12px;
+  font-size: clamp(13px, 0.3vw + 10px, 17px);
   color: var(--fg-1);
-}
-
-.lyrics-source {
-  font-size: 11px;
-  color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Source path reads as metadata, not as a third text row: a quiet pill
+   with a file glyph; the path itself ellipsizes inside. */
+.lyrics-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.lyrics-source svg {
+  flex: 0 0 auto;
+}
+
+.lyrics-source-path {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
@@ -879,20 +911,23 @@ button {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: clamp(14px, 1.6vh, 22px);
   /* Oversized padding lets the first/last line reach the vertical center,
      so auto-scrolling keeps the sung line centered everywhere. */
   padding: 38vh 24px;
 }
 
 .lyrics-line {
-  max-width: 90%;
+  /* Fluid size: ~17px at small windows, ~24px at 1920w, capped at 30px —
+     without this a maximized window leaves the text small amid huge
+     side gutters. em-based cap keeps long lines readable once scaled. */
+  max-width: min(90%, 55em);
   padding: 2px 12px;
   border: none;
   border-radius: var(--radius);
   background: transparent;
   color: var(--fg-2);
-  font-size: 17px;
+  font-size: clamp(17px, 0.65vw + 12px, 30px);
   line-height: 1.5;
   text-align: center;
   cursor: pointer;
@@ -911,9 +946,10 @@ button {
   transform: scale(1.06);
 }
 
-/* Interlude marker: pure spacing, no interaction. */
+/* Interlude marker: pure spacing, no interaction. Scales with the lyrics
+   so gaps keep their proportion on large windows. */
 .lyrics-spacer {
-  height: 28px;
+  height: clamp(28px, 3vh, 40px);
 }
 
 /* Lyrics page shares the reveal-on-hover scrollbar behavior. */
@@ -1181,4 +1217,113 @@ button {
   width: 100%;
   height: 160px;
   display: block;
+}
+
+/* ---------- art effects panel ---------- */
+
+/* Same popover geometry as the EQ / spectrum panels (all three anchor to
+   the bar's right edge and are mutually exclusive). */
+.fx-panel {
+  position: absolute;
+  right: 16px;
+  bottom: calc(100% + 10px);
+  z-index: 900;
+  width: min(540px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.fx-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.fx-head h3 {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 14px;
+}
+
+.fx-hint {
+  font-size: 12px;
+}
+
+.fx-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.fx-option {
+  padding: 8px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  cursor: pointer;
+}
+
+.fx-option:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.fx-option.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-1));
+  color: var(--fg-0);
+}
+
+.fx-option:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 1px;
+}
+
+/* ---------- art effects background (lyrics page) ---------- */
+
+/* The animated canvas spans the page under the lyrics; the veil keeps
+   text contrast stable over bright effects. */
+.lyrics-page {
+  position: relative;
+}
+
+.art-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  /* Decoration only — lyric lines keep every pointer event. */
+  pointer-events: none;
+}
+
+.art-bg-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.art-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* color-mix derives the veil from the background token — no hardcoded
+     palette rgba duplicating --bg-0. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-0) 8%, transparent),
+    color-mix(in srgb, var(--bg-0) 45%, transparent)
+  );
+}
+
+/* Lift every lyrics child above the background layer. */
+.lyrics-page > *:not(.art-bg) {
+  position: relative;
+  z-index: 1;
 }

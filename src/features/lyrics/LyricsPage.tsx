@@ -3,9 +3,10 @@
 // bar); reloading follows track changes. Clicking a line seeks to it.
 
 import { useEffect, useRef } from 'react';
+import { ArtBackground } from '@/features/lyrics/ArtBackground';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { IconButton } from '@/components/ui/IconButton';
-import { LyricsIcon } from '@/features/lyrics/LyricsIcons';
+import { LyricsIcon, SourceFileIcon } from '@/features/lyrics/LyricsIcons';
 import { formatDuration } from '@/lib/format';
 import { activeLyricIndex } from '@/lib/lyrics';
 import { useTranslation } from '@/i18n';
@@ -53,13 +54,19 @@ export function LyricsPage() {
 
   return (
     <section className="page lyrics-page" data-testid="lyrics-page">
+      <ArtBackground />
       <header className="page-header">
         <div className="lyrics-meta">
           <h2 className="lyrics-track">{track ? track.title : t('lyrics.title')}</h2>
           <div className="lyrics-artist">
             {track ? (track.artist ?? t('player.unknownArtist')) : ''}
           </div>
-          {sourcePath ? <div className="lyrics-source">{sourcePath}</div> : null}
+          {sourcePath ? (
+            <div className="lyrics-source" title={sourcePath}>
+              <SourceFileIcon />
+              <span className="lyrics-source-path">{sourcePath}</span>
+            </div>
+          ) : null}
         </div>
         <IconButton
           label={t('lyrics.close')}

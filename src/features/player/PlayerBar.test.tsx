@@ -7,6 +7,7 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { useLyricsStore } from '@/stores/lyricsStore';
 import { DEFAULT_EQ, useEqualizerStore } from '@/stores/equalizerStore';
 import { SILENT_FRAME, useSpectrumStore } from '@/stores/spectrumStore';
+import { useArtEffectStore } from '@/stores/artEffectStore';
 import { PlayerBar } from '@/features/player/PlayerBar';
 
 vi.mock('@/api', () => ({
@@ -61,6 +62,7 @@ beforeEach(() => {
   useLyricsStore.setState({ open: false });
   useEqualizerStore.setState({ open: false, eq: DEFAULT_EQ, loaded: false, error: null });
   useSpectrumStore.setState({ open: false, frame: [...SILENT_FRAME] });
+  useArtEffectStore.setState({ open: false, effect: 'off' });
   vi.mocked(api.settingsGet).mockResolvedValue({
     volume: 0.5,
     lastFolder: null,
@@ -198,6 +200,38 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('spectrum-toggle'));
     expect(useSpectrumStore.getState().open).toBe(false);
     expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+  });
+
+  it('art effects toggle opens the picker and is mutually exclusive with EQ and spectrum', async () => {
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+    const fxBtn = screen.getByTestId('fx-toggle');
+    expect(fxBtn).toHaveAttribute('aria-label', 'Show art effects');
+    expect(fxBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(fxBtn.querySelector('svg')).toBeInTheDocument();
+    expect(screen.queryByTestId('fx-panel')).not.toBeInTheDocument();
+
+    // Opening the spectrum first, then fx: only fx stays open.
+    fireEvent.click(screen.getByTestId('spectrum-toggle'));
+    expect(screen.getByTestId('spectrum-panel')).toBeInTheDocument();
+    fireEvent.click(fxBtn);
+    expect(await screen.findByTestId('fx-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('fx-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('fx-toggle')).toHaveAttribute('aria-label', 'Hide art effects');
+    expect(screen.getByTestId('fx-toggle')).toHaveClass('is-active');
+
+    // The EQ takes over in the same way, and the button toggles back off.
+    fireEvent.click(screen.getByTestId('eq-toggle'));
+    expect(screen.getByTestId('eq-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('fx-panel')).not.toBeInTheDocument();
+    expect(useArtEffectStore.getState().open).toBe(false);
+
+    fireEvent.click(screen.getByTestId('fx-toggle'));
+    expect(await screen.findByTestId('fx-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('fx-toggle'));
+    expect(useArtEffectStore.getState().open).toBe(false);
+    expect(screen.queryByTestId('fx-panel')).not.toBeInTheDocument();
   });
 
   it('volume slider commits on release', async () => {

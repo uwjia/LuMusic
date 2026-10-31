@@ -116,3 +116,5 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 （均衡器已实现：`domain/equalizer.rs` RBJ biquad 设计 + 设置净化、`infra/audio/equalizer.rs` 实时滤波（`SharedEq` 代数计数，播放中换系数不重建 sink）、`features/player/EqualizerPanel` 弹出面板 + `lib/equalizer.ts` 内置预设，入口在歌词按钮右侧；配置持久化于 `settings.json` 的 `eq` 字段。）
 
 （频谱已实现：`domain/spectrum.rs` 手写 radix-2 FFT + Hann 窗 + 对数频段聚合（24 柱，31Hz–16kHz，与 EQ 频段对齐）、`infra/audio/spectrum.rs` SPSC 无锁 tap（音频线程每采样仅原子写）+ 分析器、poller 50ms 分频（播放轮询/进度不变，频谱 ~20Hz 仅 Playing 发 `spectrum://frame`）、`features/player/SpectrumPanel` canvas 弹出面板（与 EQ 面板互斥，rAF 平滑、停播衰减归零），入口在 EQ 按钮右侧。）
+
+（艺术特效已实现：`lib/artEffects.ts` 预设注册表 + localStorage 持久化（`lumusic.artEffect`，纯前端视觉偏好**不进后端设置**）、`features/player/ArtEffectsPanel` 预设选择弹窗（与 EQ/频谱弹窗三者互斥，点选即时预览不收起，入口 sparkles 按钮在频谱右侧）、`features/lyrics/artRenderers.ts` 五种 canvas 绘制器（极光/星空/气泡/粒子/波纹，确定性种子、面积缩放粒子数）+ `ArtBackground` 歌词页背景层（DPR≤2 自适应、rAF 循环、频谱帧平滑出能量驱动、帧过期即衰减；`off` 或页面关闭时不挂载、零开销）。）

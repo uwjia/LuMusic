@@ -5,12 +5,14 @@ import { api } from '@/api';
 import type { Lyrics, PlayerState, Track } from '@/types/track';
 import { useLyricsStore } from '@/stores/lyricsStore';
 import { usePlayerStore } from '@/stores/playerStore';
+import { useArtEffectStore } from '@/stores/artEffectStore';
 import { LyricsPage } from '@/features/lyrics/LyricsPage';
 
 vi.mock('@/api', () => ({
   api: {
     lyricsGet: vi.fn(),
     playerSeek: vi.fn(),
+    onSpectrum: vi.fn(() => () => {}),
   },
 }));
 
@@ -65,6 +67,9 @@ beforeEach(() => {
     status: 'idle',
     error: null,
   });
+  // Isolate from a persisted choice in localStorage; jsdom has no canvas
+  // context, so the mounted background stays paintless either way.
+  useArtEffectStore.setState({ open: false, effect: 'off' });
 });
 
 describe('LyricsPage', () => {
@@ -83,7 +88,12 @@ describe('LyricsPage', () => {
     expect(api.lyricsGet).toHaveBeenCalledWith('t1');
     expect(screen.getByText('I Will Do')).toBeInTheDocument();
     expect(screen.getByText('Pierre')).toBeInTheDocument();
-    expect(screen.getByText(lyrics.sourcePath!)).toBeInTheDocument();
+    // Source path renders as a metadata pill with a file glyph and keeps
+    // the full path available on hover.
+    const chip = screen.getByText(lyrics.sourcePath!).closest('.lyrics-source');
+    expect(chip).toBeTruthy();
+    expect(chip!.querySelector('svg')).toBeInTheDocument();
+    expect(chip).toHaveAttribute('title', lyrics.sourcePath!);
   });
 
   it('highlights the line sung at the current position', async () => {
@@ -175,5 +185,19 @@ describe('LyricsPage', () => {
     expect(closeBtn.querySelector('svg')).toBeInTheDocument();
     fireEvent.click(closeBtn);
     expect(useLyricsStore.getState().open).toBe(false);
+  });
+
+  it('shows the art background only while an effect is selected', () => {
+    const { rerender } = render(<LyricsPage />);
+    expect(screen.getByText('Nothing playing')).toBeInTheDocument();
+    expect(screen.queryByTestId('art-bg')).not.toBeInTheDocument();
+
+    useArtEffectStore.getState().setEffect('aurora');
+    rerender(<LyricsPage />);
+    expect(screen.getByTestId('art-bg')).toBeInTheDocument();
+
+    useArtEffectStore.getState().setEffect('off');
+    rerender(<LyricsPage />);
+    expect(screen.queryByTestId('art-bg')).not.toBeInTheDocument();
   });
 });

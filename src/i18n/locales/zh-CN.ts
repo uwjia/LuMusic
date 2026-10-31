@@ -68,12 +68,25 @@ export const zhCN: Record<MessageKey, string> = {
   'player.hideEqualizer': '隐藏均衡器',
   'player.showSpectrum': '显示频谱',
   'player.hideSpectrum': '隐藏频谱',
+  'player.showArtEffects': '显示艺术特效',
+  'player.hideArtEffects': '隐藏艺术特效',
 
   // spectrum panel
   'spectrum.title': '频谱',
   'spectrum.live': '实时',
   'spectrum.idle': '待机',
   'spectrum.canvasLabel': '实时频谱',
+
+  // 艺术特效面板（歌词页背景预设）
+  'fx.title': '艺术特效',
+  'fx.hint': '显示在歌词页面的背景。',
+  'fx.off': '关闭',
+  'fx.aurora': '极光',
+  'fx.starfield': '星空',
+  'fx.bubbles': '气泡',
+  'fx.particles': '粒子漂流',
+  'fx.wave': '律动波纹',
+  'fx.canvasLabel': '艺术背景特效',
 
   // equalizer panel
   'eq.title': '均衡器',

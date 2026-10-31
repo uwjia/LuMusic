@@ -68,12 +68,25 @@ export const en = {
   'player.hideEqualizer': 'Hide equalizer',
   'player.showSpectrum': 'Show spectrum',
   'player.hideSpectrum': 'Hide spectrum',
+  'player.showArtEffects': 'Show art effects',
+  'player.hideArtEffects': 'Hide art effects',
 
   // spectrum panel
   'spectrum.title': 'Spectrum',
   'spectrum.live': 'Live',
   'spectrum.idle': 'Idle',
   'spectrum.canvasLabel': 'Live frequency spectrum',
+
+  // art effects panel (lyrics-page background presets)
+  'fx.title': 'Art effects',
+  'fx.hint': 'Renders behind the lyrics page.',
+  'fx.off': 'Off',
+  'fx.aurora': 'Aurora',
+  'fx.starfield': 'Starfield',
+  'fx.bubbles': 'Bubbles',
+  'fx.particles': 'Particles',
+  'fx.wave': 'Waves',
+  'fx.canvasLabel': 'Artistic background effect',
 
   // equalizer panel
   'eq.title': 'Equalizer',
