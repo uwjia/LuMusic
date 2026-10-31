@@ -9,6 +9,7 @@ import type {
   ScanProgress,
   ScanSummary,
   Settings,
+  SpectrumFrame,
   Track,
   TrackId,
   TrackQuery,
@@ -64,4 +65,6 @@ export interface PlayerApi {
   onProgress(cb: (p: { positionSecs: number; durationSecs: number | null }) => void): Unsubscribe;
   onScanProgress(cb: (p: ScanProgress) => void): Unsubscribe;
   onLibraryUpdated(cb: (summary: ScanSummary) => void): Unsubscribe;
+  /** Spectrum frames (~20 Hz, only while playing). */
+  onSpectrum(cb: (frame: SpectrumFrame) => void): Unsubscribe;
 }

@@ -95,6 +95,13 @@ export interface TrayLabels {
   nothingPlaying: string;
 }
 
+/** One spectrum frame: normalized 0..1 magnitude per bar (backend FFT,
+ * event `spectrum://frame`, only emitted while playing). */
+export type SpectrumFrame = number[];
+
+/** Bars per frame — mirrors `domain::spectrum::SPECTRUM_BARS`. */
+export const SPECTRUM_BARS = 24;
+
 export interface ProgressPayload {
   positionSecs: number;
   durationSecs: number | null;
@@ -117,5 +124,6 @@ export interface Lyrics {
 // Event names (mirror src-tauri/src/events.rs).
 export const PLAYER_STATE_EVENT = 'player://state';
 export const PLAYER_PROGRESS_EVENT = 'player://progress';
+export const SPECTRUM_EVENT = 'spectrum://frame';
 export const LIBRARY_UPDATED_EVENT = 'library://updated';
 export const LIBRARY_SCAN_PROGRESS_EVENT = 'library://scan-progress';

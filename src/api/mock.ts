@@ -15,10 +15,12 @@ import type {
   ScanProgress,
   ScanSummary,
   Settings,
+  SpectrumFrame,
   Track,
   TrackQuery,
   TrayLabels,
 } from '@/types/track';
+import { SPECTRUM_BARS } from '@/types/track';
 
 const TRACKS_ROOT = 'C:/mock-music';
 
@@ -99,8 +101,13 @@ class MockApi implements PlayerApi {
   private progressEvents = emitter<{ positionSecs: number; durationSecs: number | null }>();
   private scanProgressEvents = emitter<ScanProgress>();
   private libraryEvents = emitter<ScanSummary>();
+  private spectrumEvents = emitter<SpectrumFrame>();
 
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Monotonic playlist id suffix (Date.now() can collide under fake timers). */
+  private playlistSeq = 0;
+  /** Smoothed synthetic spectrum state (dev:mock visualization only). */
+  private spectrumState: SpectrumFrame = Array(SPECTRUM_BARS).fill(0);
   private closeToTray = true;
   /** Mirrors the persisted backend EQ (disabled/flat by default). */
   private eq: EqSettings = { enabled: false, preampDb: 0, gainsDb: Array(10).fill(0) };
@@ -134,6 +141,14 @@ class MockApi implements PlayerApi {
     if (this.timer) return;
     this.timer = setInterval(() => {
       if (this.status !== 'playing') return;
+      // Mirror the backend: frames only flow while playing. The mock
+      // synthesizes a decaying, low-biased curve so dev:mock shows motion.
+      this.spectrumState = this.spectrumState.map((value, bar) => {
+        const target =
+          Math.max(0.06, 0.85 - bar * 0.032) * (0.5 + 0.5 * Math.random());
+        return value * 0.45 + target * 0.55;
+      });
+      this.spectrumEvents.emit([...this.spectrumState]);
       const duration = this.snapshot().durationSecs ?? Number.POSITIVE_INFINITY;
       this.positionSecs += 0.25;
       this.progressEvents.emit({
@@ -355,7 +370,10 @@ class MockApi implements PlayerApi {
       throw new Error(`invalid or duplicate playlist name: ${name}`);
     }
     const playlist: Playlist = {
-      id: `pl-${Date.now()}`,
+      // Monotonic suffix keeps ids unique even when fake timers freeze
+      // Date.now() within one millisecond (duplicate ids made lookups
+      // resolve to the wrong playlist).
+      id: `pl-${Date.now()}-${++this.playlistSeq}`,
       name: trimmed,
       items: [],
       createdAt: Math.floor(Date.now() / 1000),
@@ -462,6 +480,10 @@ class MockApi implements PlayerApi {
 
   onLibraryUpdated(cb: (s: ScanSummary) => void) {
     return this.libraryEvents.on(cb);
+  }
+
+  onSpectrum(cb: (frame: SpectrumFrame) => void) {
+    return this.spectrumEvents.on(cb);
   }
 }
 

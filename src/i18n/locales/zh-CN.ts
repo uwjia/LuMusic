@@ -66,6 +66,14 @@ export const zhCN: Record<MessageKey, string> = {
   'player.hideLyrics': '隐藏歌词',
   'player.showEqualizer': '显示均衡器',
   'player.hideEqualizer': '隐藏均衡器',
+  'player.showSpectrum': '显示频谱',
+  'player.hideSpectrum': '隐藏频谱',
+
+  // spectrum panel
+  'spectrum.title': '频谱',
+  'spectrum.live': '实时',
+  'spectrum.idle': '待机',
+  'spectrum.canvasLabel': '实时频谱',
 
   // equalizer panel
   'eq.title': '均衡器',

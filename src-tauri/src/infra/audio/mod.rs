@@ -2,4 +2,5 @@
 
 pub mod engine;
 pub mod equalizer;
+pub mod spectrum;
 pub mod symphonia_source;

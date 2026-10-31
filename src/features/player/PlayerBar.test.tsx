@@ -6,6 +6,7 @@ import type { PlayerState, Track } from '@/types/track';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useLyricsStore } from '@/stores/lyricsStore';
 import { DEFAULT_EQ, useEqualizerStore } from '@/stores/equalizerStore';
+import { SILENT_FRAME, useSpectrumStore } from '@/stores/spectrumStore';
 import { PlayerBar } from '@/features/player/PlayerBar';
 
 vi.mock('@/api', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/api', () => ({
     playerSetMode: vi.fn(),
     settingsGet: vi.fn(),
     settingsSet: vi.fn(),
+    onSpectrum: vi.fn(() => () => {}),
   },
 }));
 
@@ -58,6 +60,7 @@ beforeEach(() => {
   usePlayerStore.setState({ state: null, error: null });
   useLyricsStore.setState({ open: false });
   useEqualizerStore.setState({ open: false, eq: DEFAULT_EQ, loaded: false, error: null });
+  useSpectrumStore.setState({ open: false, frame: [...SILENT_FRAME] });
   vi.mocked(api.settingsGet).mockResolvedValue({
     volume: 0.5,
     lastFolder: null,
@@ -165,6 +168,36 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('eq-toggle'));
     expect(useEqualizerStore.getState().open).toBe(false);
     expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
+  });
+
+  it('spectrum toggle opens the panel and is mutually exclusive with the EQ panel', async () => {
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+    const eqBtn = screen.getByTestId('eq-toggle');
+    const spectrumBtn = screen.getByTestId('spectrum-toggle');
+    expect(spectrumBtn).toHaveAttribute('aria-label', 'Show spectrum');
+    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+
+    // Open the EQ first, then the spectrum: only the spectrum stays open.
+    fireEvent.click(eqBtn);
+    expect(screen.getByTestId('eq-panel')).toBeInTheDocument();
+    fireEvent.click(spectrumBtn);
+    expect(await screen.findByTestId('spectrum-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('eq-panel')).not.toBeInTheDocument();
+    expect(useSpectrumStore.getState().open).toBe(true);
+    expect(useEqualizerStore.getState().open).toBe(false);
+    expect(api.onSpectrum).toHaveBeenCalledTimes(1); // panel subscribes on mount
+
+    // And back: reopening the EQ closes the spectrum.
+    fireEvent.click(screen.getByTestId('eq-toggle'));
+    expect(screen.getByTestId('eq-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('spectrum-toggle'));
+    expect(screen.getByTestId('spectrum-toggle')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('spectrum-toggle'));
+    expect(useSpectrumStore.getState().open).toBe(false);
+    expect(screen.queryByTestId('spectrum-panel')).not.toBeInTheDocument();
   });
 
   it('volume slider commits on release', async () => {

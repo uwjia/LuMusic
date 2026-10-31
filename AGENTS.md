@@ -102,6 +102,11 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 - 风格：单引号、分号、2 空格缩进、尾逗号；注释写"为什么"而非"是什么"。
 - 提交信息：Conventional Commits，**只能使用英文**（标题与正文均不得出现中文，含示例名、文件名等一律英文），如 `feat(playlists): add context menu`、`fix(scan): follow symlinks`。
 
+### 样式（CSS）
+
+- 样式集中在 `src/styles/global.css`，颜色/圆角一律用 `:root` 设计令牌（`--bg-*`/`--fg-*`/`--accent*`），禁止硬编码色值。
+- **原生 `<select>` 必须自绘箭头**：`appearance: none` + 内联 SVG 背景（参照 `.eq-select`）。WebView2 的原生下拉箭头不受 `padding-right` 影响、会紧贴右边缘；同时补 `:focus-visible` 边框高亮，与输入框一致。
+
 ### Non-goals（当前不做）
 
 无缝播放、标签编辑、封面提取。遇到相关需求先确认范围。
@@ -109,3 +114,5 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 （歌词已实现：`domain/lyrics.rs` 解析、`infra/lyrics.rs` 同名 `.lrc` 自动关联 + 编码修复、`features/lyrics` 渲染页，入口在播放模式按钮左侧。）
 
 （均衡器已实现：`domain/equalizer.rs` RBJ biquad 设计 + 设置净化、`infra/audio/equalizer.rs` 实时滤波（`SharedEq` 代数计数，播放中换系数不重建 sink）、`features/player/EqualizerPanel` 弹出面板 + `lib/equalizer.ts` 内置预设，入口在歌词按钮右侧；配置持久化于 `settings.json` 的 `eq` 字段。）
+
+（频谱已实现：`domain/spectrum.rs` 手写 radix-2 FFT + Hann 窗 + 对数频段聚合（24 柱，31Hz–16kHz，与 EQ 频段对齐）、`infra/audio/spectrum.rs` SPSC 无锁 tap（音频线程每采样仅原子写）+ 分析器、poller 50ms 分频（播放轮询/进度不变，频谱 ~20Hz 仅 Playing 发 `spectrum://frame`）、`features/player/SpectrumPanel` canvas 弹出面板（与 EQ 面板互斥，rAF 平滑、停播衰减归零），入口在 EQ 按钮右侧。）

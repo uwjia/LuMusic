@@ -457,6 +457,17 @@ impl PlayerService {
         }
     }
 
+    /// Latest spectrum frame from the engine, or `None` when the engine
+    /// does not capture audio. Called by the poller (~20 Hz) while playing.
+    pub fn spectrum(&mut self) -> Option<Vec<f32>> {
+        self.engine.spectrum()
+    }
+
+    /// Cheaper than `state()` for status-only poller checks (no DTO clone).
+    pub fn status(&self) -> PlaybackStatus {
+        self.status
+    }
+
     /// Snapshot for the UI.
     pub fn state(&self) -> PlayerStateDto {
         let current_track = self
@@ -1245,6 +1256,19 @@ mod tests {
     }
 
     // ---------- close-to-tray setting ----------
+
+    // ---------- spectrum ----------
+
+    #[test]
+    fn spectrum_returns_none_for_engines_without_capture() {
+        // MockEngine uses the trait default: no fabricated frames.
+        let (mut service, _engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None)
+            .unwrap();
+        assert_eq!(service.spectrum(), None);
+        assert_eq!(service.status(), PlaybackStatus::Playing);
+    }
 
     // ---------- equalizer ----------
 

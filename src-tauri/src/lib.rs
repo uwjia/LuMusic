@@ -140,30 +140,38 @@ pub fn run() {
         });
 }
 
-/// Background tick (~10 Hz): auto-advance finished tracks, emit a state event
-/// on changes and a throttled progress event (~4 Hz) while playing.
+/// Background tick (~20 Hz base): auto-advance finished tracks, emit a
+/// state event on changes, a throttled progress event (~4 Hz) and spectrum
+/// frames (~20 Hz) while playing. The base tick exists for the spectrum;
+/// playback polling keeps its original ~10 Hz cadence via tick division.
 fn poll_loop(app: tauri::AppHandle<Wry>, service: SharedService) {
     let mut last_progress = Instant::now() - Duration::from_secs(1);
+    let mut tick: u32 = 0;
     loop {
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
+        tick = tick.wrapping_add(1);
 
-        let outcome = {
-            let mut guard = match service.lock() {
-                Ok(guard) => guard,
-                Err(_) => return, // poisoned: stop the thread
+        // Playback rules every 2 ticks (~10 Hz, unchanged behavior).
+        if tick % 2 == 0 {
+            let outcome = {
+                let mut guard = match service.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return, // poisoned: stop the thread
+                };
+                guard.poll()
             };
-            guard.poll()
-        };
 
-        match outcome {
-            PollOutcome::Unchanged => {}
-            PollOutcome::Advanced | PollOutcome::Stopped | PollOutcome::Failed(_) => {
-                if let Ok(guard) = service.lock() {
-                    emit_state(&app, &guard);
+            match outcome {
+                PollOutcome::Unchanged => {}
+                PollOutcome::Advanced | PollOutcome::Stopped | PollOutcome::Failed(_) => {
+                    if let Ok(guard) = service.lock() {
+                        emit_state(&app, &guard);
+                    }
                 }
             }
         }
 
+        // Progress every 5 ticks (~4 Hz).
         if last_progress.elapsed() >= Duration::from_millis(250) {
             last_progress = Instant::now();
             if let Ok(guard) = service.lock() {
@@ -174,6 +182,16 @@ fn poll_loop(app: tauri::AppHandle<Wry>, service: SharedService) {
                         duration_secs: state.duration_secs,
                     };
                     let _ = app.emit(ev::EVENT_PLAYER_PROGRESS, progress);
+                }
+            }
+        }
+
+        // Spectrum every tick (~20 Hz), playing tracks only: paused or
+        // stopped sessions emit nothing and the UI fades its bars to zero.
+        if let Ok(mut guard) = service.lock() {
+            if guard.status() == app::dto::PlaybackStatus::Playing {
+                if let Some(frame) = guard.spectrum() {
+                    let _ = app.emit(ev::EVENT_SPECTRUM, frame);
                 }
             }
         }

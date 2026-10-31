@@ -66,6 +66,14 @@ export const en = {
   'player.hideLyrics': 'Hide lyrics',
   'player.showEqualizer': 'Show equalizer',
   'player.hideEqualizer': 'Hide equalizer',
+  'player.showSpectrum': 'Show spectrum',
+  'player.hideSpectrum': 'Hide spectrum',
+
+  // spectrum panel
+  'spectrum.title': 'Spectrum',
+  'spectrum.live': 'Live',
+  'spectrum.idle': 'Idle',
+  'spectrum.canvasLabel': 'Live frequency spectrum',
 
   // equalizer panel
   'eq.title': 'Equalizer',

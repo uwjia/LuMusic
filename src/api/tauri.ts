@@ -10,9 +10,11 @@ import {
   LIBRARY_UPDATED_EVENT,
   PLAYER_PROGRESS_EVENT,
   PLAYER_STATE_EVENT,
+  SPECTRUM_EVENT,
   type PlayerState,
   type ScanProgress,
   type ScanSummary,
+  type SpectrumFrame,
   type Track,
 } from '@/types/track';
 
@@ -79,4 +81,5 @@ export const tauriApi: PlayerApi = {
   onProgress: (cb) => wire(PLAYER_PROGRESS_EVENT, cb),
   onScanProgress: (cb) => wire<ScanProgress>(LIBRARY_SCAN_PROGRESS_EVENT, cb),
   onLibraryUpdated: (cb) => wire<ScanSummary>(LIBRARY_UPDATED_EVENT, cb),
+  onSpectrum: (cb) => wire<SpectrumFrame>(SPECTRUM_EVENT, cb),
 };

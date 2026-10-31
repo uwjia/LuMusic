@@ -13,6 +13,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('mock spectrum seam', () => {
+  // Runs first: the mock singleton's ticker interval is created inside
+  // *this* test's fake-timer environment (later beforeEach calls replace
+  // the fake clock, which orphans intervals registered earlier).
+  it('emits 24-bar frames while playing and stops when paused', async () => {
+    const frames: number[][] = [];
+    const unsubscribe = mockApi.onSpectrum((frame) => frames.push(frame));
+    const tracks = await mockApi.playlistGetTracks('auto:root');
+    await mockApi.playerLoad(tracks.map((t) => t.id), 0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(frames.length).toBeGreaterThanOrEqual(3);
+    for (const frame of frames) {
+      expect(frame).toHaveLength(24);
+      expect(frame.every((bar) => bar >= 0 && bar <= 1)).toBe(true);
+    }
+
+    // Paused tracks emit nothing new.
+    const countWhenPaused = frames.length;
+    await mockApi.playerPause();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(frames.length).toBe(countWhenPaused);
+    unsubscribe();
+  });
+});
+
 describe('mock auto playlists', () => {
   it('creates All Tracks, Default and per-folder playlists on scan', async () => {
     const playlists = await mockApi.playlistList();

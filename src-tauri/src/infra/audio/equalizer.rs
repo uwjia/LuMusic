@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use rodio::Source;
 
+use super::spectrum::SpectrumTap;
+
 use crate::domain::equalizer::{design_bank, db_to_linear, BiquadCoeffs, BiquadState, EqSettings, BAND_COUNT};
 
 /// EQ state shared between the service (writer) and the audio thread
@@ -85,6 +87,9 @@ impl FilterBank {
 pub struct EqualizerSource<S> {
     inner: S,
     shared: Arc<SharedEq>,
+    /// Optional spectrum capture fed with the post-EQ signal (what the
+    /// user actually hears); `None` in tests that only exercise EQ math.
+    tap: Option<Arc<SpectrumTap>>,
     /// None while bypassed (disabled); Some when filtering.
     bank: Option<FilterBank>,
     last_generation: u64,
@@ -100,11 +105,21 @@ impl<S> EqualizerSource<S> {
         Self {
             inner,
             shared,
+            tap: None,
             bank: None,
             last_generation: 0, // forces a first refresh
             cached_spec: (0, 0),
             preamp: 1.0,
             channel_index: 0,
+        }
+    }
+
+    /// Same as `new`, but mirrors every emitted sample into `tap` (used by
+    /// the engine for the spectrum view; one atomic store per sample).
+    pub fn with_tap(inner: S, shared: Arc<SharedEq>, tap: Arc<SpectrumTap>) -> Self {
+        Self {
+            tap: Some(tap),
+            ..Self::new(inner, shared)
         }
     }
 }
@@ -152,18 +167,26 @@ impl<S: Source<Item = f32>> Iterator for EqualizerSource<S> {
         let channels = self.inner.channels();
         let rate = self.inner.sample_rate();
         self.refresh_if_stale(rate, channels);
-        let Some(bank) = self.bank.as_mut() else {
-            return Some(sample); // bypassed
+        let value = match self.bank.as_mut() {
+            None => sample, // bypassed
+            Some(bank) => {
+                let channels = bank.channels;
+                let channel = self.channel_index as usize;
+                self.channel_index = (self.channel_index + 1) % channels.max(1);
+                let mut value = sample * self.preamp;
+                // Split the bank borrow so coefficients and states coexist.
+                let FilterBank { coeffs, states, .. } = bank;
+                for (coeffs, states) in coeffs.iter().zip(states.iter_mut()) {
+                    let index = channel.min(states.len().saturating_sub(1));
+                    value = states[index].process(coeffs, value);
+                }
+                value
+            }
         };
-        let channels = bank.channels;
-        let channel = self.channel_index as usize;
-        self.channel_index = (self.channel_index + 1) % channels.max(1);
-        let mut value = sample * self.preamp;
-        // Split the bank borrow so coefficients and states coexist.
-        let FilterBank { coeffs, states, .. } = bank;
-        for (coeffs, states) in coeffs.iter().zip(states.iter_mut()) {
-            let index = channel.min(states.len().saturating_sub(1));
-            value = states[index].process(coeffs, value);
+        // Mirror the emitted sample for the spectrum view (bypassed EQ
+        // included — the visualization must not depend on the EQ switch).
+        if let Some(tap) = &self.tap {
+            tap.push(value);
         }
         Some(value)
     }
@@ -342,5 +365,58 @@ mod tests {
         assert_eq!(source.total_duration(), None);
         assert!(source.next().is_some());
         assert!(source.current_frame_len().is_some());
+    }
+
+    /// The tap must mirror the *emitted* signal on every path: disabled EQ
+    /// (bypass) and enabled EQ alike, in emission order.
+    #[test]
+    fn tap_captures_emitted_samples_on_bypass_and_filter_paths() {
+        for enabled in [false, true] {
+            let shared = Arc::new(SharedEq::new(EqSettings {
+                enabled,
+                preamp_db: 0.0,
+                // Flat gains keep the filtered path == bypass mathematically,
+                // so both paths must produce identical tap contents.
+                gains_db: vec![0.0; BAND_COUNT],
+            }));
+            let tap = Arc::new(SpectrumTap::new(64));
+            let inner = source_from_bytes(wav_sine(440.0, 0.05), "t.wav").unwrap();
+            let mut source = EqualizerSource::with_tap(inner, shared, tap.clone());
+            let emitted: Vec<f32> = (&mut source).take(16).collect();
+            let mut captured = Vec::new();
+            assert_eq!(tap.snapshot_newest(16, &mut captured), 16);
+            assert_eq!(captured, emitted, "enabled={enabled}");
+        }
+    }
+
+    #[test]
+    fn tap_sees_the_boosted_signal_when_eq_is_active() {
+        let shared = Arc::new(SharedEq::new(EqSettings::default()));
+        let tap = Arc::new(SpectrumTap::new(8192));
+        // 20 Hz sine: full bass boost must make captured samples louder.
+        let inner = source_from_bytes(wav_sine(20.0, 0.5), "t.wav").unwrap();
+        let mut source = EqualizerSource::with_tap(inner, shared.clone(), tap.clone());
+        let flat: Vec<f32> = (&mut source).take(30_000).collect();
+        let flat_peak = flat.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+
+        shared.set(
+            EqSettings {
+                enabled: true,
+                preamp_db: 0.0,
+                gains_db: vec![12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }
+            .sanitize(),
+        );
+        let boosted: Vec<f32> = source.take(30_000).collect();
+        let boosted_peak = boosted.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+
+        let mut captured = Vec::new();
+        tap.snapshot_newest(8192, &mut captured);
+        let captured_peak = captured.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+        assert!(
+            captured_peak > boosted_peak * 0.8,
+            "tap must mirror the boosted tail: {captured_peak} vs {boosted_peak}"
+        );
+        assert!(boosted_peak > flat_peak * 1.5);
     }
 }

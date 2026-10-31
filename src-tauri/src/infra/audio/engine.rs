@@ -13,8 +13,10 @@ use std::sync::{Arc, Mutex};
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 
 use super::equalizer::{EqualizerSource, SharedEq};
+use super::spectrum::{SpectrumAnalyzer, SpectrumTap};
 use super::symphonia_source::{PosTracker, SourceError, SymphoniaSource};
 use crate::domain::equalizer::EqSettings;
+use crate::domain::spectrum::FFT_SIZE;
 use symphonia::core::io::MediaSourceStream;
 
 /// Engine-level errors.
@@ -54,6 +56,12 @@ pub trait AudioEngine: Send {
     fn set_volume(&mut self, volume: f32);
     /// Applies equalizer settings live (no sink recreation, no gap).
     fn set_eq(&mut self, eq: &EqSettings);
+    /// Latest spectrum frame (normalized per-bar magnitudes), or `None`
+    /// when no engine captures audio (device-less, mock engines). Default
+    /// `None` keeps mock/null engines untouched.
+    fn spectrum(&mut self) -> Option<Vec<f32>> {
+        None
+    }
     /// Seeks within the current track (no-op when nothing is loaded).
     fn seek(&mut self, secs: f64) -> Result<(), AudioError>;
     fn position_secs(&self) -> f64;
@@ -104,6 +112,7 @@ struct EngineSnapshot {
     paused: bool,
     active: bool,
     volume: f32,
+    sample_rate: u32,
     current_path: Option<PathBuf>,
     tracker: Option<Arc<PosTracker>>,
 }
@@ -117,9 +126,14 @@ struct DeviceState {
     paused: bool,
     path: Option<PathBuf>,
     tracker: Option<Arc<PosTracker>>,
+    /// Sample rate of the currently loaded source (0 = nothing loaded);
+    /// drives spectrum bin→frequency mapping.
+    sample_rate: u32,
     /// Live equalizer state, read by every appended `EqualizerSource`;
     /// outlives individual sinks so track changes keep the curve.
     eq: Arc<SharedEq>,
+    /// Spectrum capture written by every appended source (post-EQ signal).
+    spectrum_tap: Arc<SpectrumTap>,
 }
 
 impl DeviceState {
@@ -128,6 +142,7 @@ impl DeviceState {
             paused: self.paused,
             active: self.sink.as_ref().map(|s| !s.empty()).unwrap_or(false),
             volume: self.volume,
+            sample_rate: self.sample_rate,
             current_path: self.path.clone(),
             tracker: self.tracker.clone(),
         }
@@ -144,9 +159,14 @@ impl DeviceState {
             source.seek_by_time(secs)?;
         }
         let tracker = source.position_tracker();
+        self.sample_rate = source.sample_rate();
         let sink = Sink::try_new(&self.handle).map_err(|_| AudioError::NoDevice)?;
         sink.set_volume(self.volume);
-        sink.append(EqualizerSource::new(source, self.eq.clone()));
+        sink.append(EqualizerSource::with_tap(
+            source,
+            self.eq.clone(),
+            self.spectrum_tap.clone(),
+        ));
         // Replacing the previous sink drops (and therefore stops) it.
         self.sink = Some(sink);
         self.tracker = Some(tracker.clone());
@@ -160,6 +180,9 @@ impl DeviceState {
 pub struct RodioEngine {
     tx: Sender<Command>,
     snapshot: Arc<Mutex<EngineSnapshot>>,
+    /// Drains the audio thread's tap into display frames; cheap enough to
+    /// lock per poller tick (~20 Hz).
+    analyzer: Mutex<SpectrumAnalyzer>,
 }
 
 impl RodioEngine {
@@ -174,6 +197,8 @@ impl RodioEngine {
         let (init_tx, init_rx) = mpsc::channel::<Result<(), AudioError>>();
         let eq = Arc::new(SharedEq::new(EqSettings::default()));
         let thread_eq = eq.clone();
+        let tap = Arc::new(SpectrumTap::new(FFT_SIZE * 2));
+        let thread_tap = tap.clone();
         std::thread::Builder::new()
             .name("lumusic-audio".into())
             .spawn(move || {
@@ -192,14 +217,20 @@ impl RodioEngine {
                     paused: false,
                     path: None,
                     tracker: None,
+                    sample_rate: 0,
                     eq: thread_eq,
+                    spectrum_tap: thread_tap,
                 };
                 let _ = init_tx.send(Ok(()));
                 audio_loop(state, rx, thread_snapshot);
             })
             .map_err(|_| AudioError::NoDevice)?;
         init_rx.recv().map_err(|_| AudioError::NoDevice)??;
-        Ok(Self { tx, snapshot })
+        Ok(Self {
+            tx,
+            snapshot,
+            analyzer: Mutex::new(SpectrumAnalyzer::new(tap)),
+        })
     }
 
     fn call<T>(&self, build: impl FnOnce(Reply<T>) -> Command) -> Option<T> {
@@ -322,6 +353,15 @@ impl AudioEngine for RodioEngine {
 
     fn set_eq(&mut self, eq: &EqSettings) {
         let _ = self.tx.send(Command::SetEq { eq: eq.clone() });
+    }
+
+    fn spectrum(&mut self) -> Option<Vec<f32>> {
+        let snapshot = self.query();
+        if snapshot.sample_rate == 0 {
+            return None; // nothing loaded yet
+        }
+        let mut analyzer = self.analyzer.lock().unwrap_or_else(|e| e.into_inner());
+        analyzer.frame(snapshot.sample_rate)
     }
 
     fn seek(&mut self, secs: f64) -> Result<(), AudioError> {
@@ -474,5 +514,13 @@ mod tests {
         assert!(engine.is_paused());
         engine.resume();
         assert!(!engine.is_paused());
+    }
+
+    #[test]
+    fn engines_without_capture_report_no_spectrum() {
+        // The trait default: mock/null engines never fabricate frames.
+        let mut engine = NullEngine::default();
+        engine.load_and_play(Path::new("C:/any.flac")).unwrap();
+        assert_eq!(engine.spectrum(), None);
     }
 }
