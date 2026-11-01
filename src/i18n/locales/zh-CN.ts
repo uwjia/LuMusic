@@ -85,6 +85,7 @@ export const zhCN: Record<MessageKey, string> = {
   'fx.particles': '粒子漂流',
   'fx.wave': '律动波纹',
   'fx.moonsea': '月亮星空',
+  'fx.snow': '落雪',
   'fx.canvasLabel': '艺术背景特效',
 
   // equalizer panel

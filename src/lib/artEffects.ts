@@ -15,7 +15,8 @@ export type ArtEffectId =
   | 'bubbles'
   | 'particles'
   | 'wave'
-  | 'moonsea';
+  | 'moonsea'
+  | 'snow';
 
 /** Presets in display order; `off` first is the default/no-effect state. */
 export const ART_EFFECTS: readonly ArtEffectId[] = [
@@ -26,6 +27,7 @@ export const ART_EFFECTS: readonly ArtEffectId[] = [
   'particles',
   'wave',
   'moonsea',
+  'snow',
 ];
 
 export const DEFAULT_ART_EFFECT: ArtEffectId = 'off';
@@ -39,6 +41,7 @@ export const ART_EFFECT_LABEL_KEY: Record<ArtEffectId, MessageKey> = {
   particles: 'fx.particles',
   wave: 'fx.wave',
   moonsea: 'fx.moonsea',
+  snow: 'fx.snow',
 };
 
 export const ART_EFFECT_STORAGE_KEY = 'lumusic.artEffect';

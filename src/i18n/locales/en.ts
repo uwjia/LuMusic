@@ -85,6 +85,7 @@ export const en = {
   'fx.particles': 'Particles',
   'fx.wave': 'Waves',
   'fx.moonsea': 'Moon & Stars',
+  'fx.snow': 'Snowfall',
   'fx.canvasLabel': 'Artistic background effect',
 
   // equalizer panel
