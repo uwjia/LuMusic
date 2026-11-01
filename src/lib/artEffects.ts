@@ -8,7 +8,14 @@
 
 import type { MessageKey } from '@/i18n';
 
-export type ArtEffectId = 'off' | 'aurora' | 'starfield' | 'bubbles' | 'particles' | 'wave';
+export type ArtEffectId =
+  | 'off'
+  | 'aurora'
+  | 'starfield'
+  | 'bubbles'
+  | 'particles'
+  | 'wave'
+  | 'moonsea';
 
 /** Presets in display order; `off` first is the default/no-effect state. */
 export const ART_EFFECTS: readonly ArtEffectId[] = [
@@ -18,6 +25,7 @@ export const ART_EFFECTS: readonly ArtEffectId[] = [
   'bubbles',
   'particles',
   'wave',
+  'moonsea',
 ];
 
 export const DEFAULT_ART_EFFECT: ArtEffectId = 'off';
@@ -30,6 +38,7 @@ export const ART_EFFECT_LABEL_KEY: Record<ArtEffectId, MessageKey> = {
   bubbles: 'fx.bubbles',
   particles: 'fx.particles',
   wave: 'fx.wave',
+  moonsea: 'fx.moonsea',
 };
 
 export const ART_EFFECT_STORAGE_KEY = 'lumusic.artEffect';

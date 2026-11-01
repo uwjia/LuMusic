@@ -8,6 +8,8 @@ import {
   auroraRenderer,
   auroraY,
   bubblesRenderer,
+  moonseaRenderer,
+  moonStars,
   particlesRenderer,
   starfieldRenderer,
   waveRenderer,
@@ -114,5 +116,22 @@ describe('renderers', () => {
       expect(y).toBeGreaterThan(0);
       expect(y).toBeLessThan(1.2);
     }
+  });
+
+  it('moonsea: deterministic star field within bounds, carried by create', () => {
+    const stars = moonStars();
+    expect(stars).toHaveLength(70);
+    expect(moonStars(12)).toHaveLength(12);
+    // Same seed -> same sky on every mount.
+    expect(stars).toEqual(moonStars());
+    expect(stars.every((s) => s.x01 >= 0 && s.x01 < 1)).toBe(true);
+    expect(stars.every((s) => s.y01 >= 0 && s.y01 <= 0.85)).toBe(true);
+    // Distinct per-star phases keep the twinkle from syncing up.
+    expect(new Set(stars.map((s) => s.phase)).size).toBe(70);
+
+    const state = moonseaRenderer.create(800, 600);
+    expect(state.stars).toEqual(stars);
+    // Sky + stars + moon: stateless per frame, drawing must not throw.
+    expect(() => moonseaRenderer.draw(state, frame())).not.toThrow();
   });
 });
