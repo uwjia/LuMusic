@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '@/api';
 import type { Lyrics } from '@/types/track';
+import { LYRICS_OPEN_STORAGE_KEY } from '@/lib/lyricsVisibility';
 import { useLyricsStore } from '@/stores/lyricsStore';
 
 vi.mock('@/api', () => ({
@@ -18,6 +19,9 @@ const lyrics: Lyrics = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The visibility flag only reads storage at module load; clearing keeps
+  // assertions on freshly written values honest.
+  localStorage.removeItem(LYRICS_OPEN_STORAGE_KEY);
   useLyricsStore.setState({
     open: false,
     trackId: null,
@@ -34,6 +38,28 @@ describe('lyricsStore', () => {
     expect(useLyricsStore.getState().open).toBe(true);
     useLyricsStore.getState().setOpen(false);
     expect(useLyricsStore.getState().open).toBe(false);
+  });
+
+  it('persists the visibility flag on setOpen and toggle', () => {
+    useLyricsStore.getState().setOpen(true);
+    expect(localStorage.getItem(LYRICS_OPEN_STORAGE_KEY)).toBe('true');
+    useLyricsStore.getState().toggle();
+    expect(localStorage.getItem(LYRICS_OPEN_STORAGE_KEY)).toBe('false');
+  });
+
+  it('restores the persisted visibility when the store is (re)created', async () => {
+    // Simulates a restart: a fresh module registry re-reads localStorage.
+    localStorage.setItem(LYRICS_OPEN_STORAGE_KEY, 'true');
+    vi.resetModules();
+    const { useLyricsStore: fresh } = await import('@/stores/lyricsStore');
+    expect(fresh.getState().open).toBe(true);
+    // Hidden is the default for a missing/cleared value.
+    localStorage.removeItem(LYRICS_OPEN_STORAGE_KEY);
+    vi.resetModules();
+    const { useLyricsStore: cleared } = await import('@/stores/lyricsStore');
+    expect(cleared.getState().open).toBe(false);
+    // Leave a module registry consistent with the top-level import above.
+    vi.resetModules();
   });
 
   it('load(null) resets to idle (playback stopped)', async () => {

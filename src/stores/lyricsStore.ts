@@ -1,9 +1,12 @@
 // Lyrics state: page visibility + per-track lyric loading.
 // Data flows through the api seam (mockable); time-based highlighting
 // stays in the page component where the playback position lives.
+// The visibility flag persists to localStorage (pure-UI preference, same
+// as the language and art-effect choices).
 
 import { create } from 'zustand';
 import { api } from '@/api';
+import { loadStoredLyricsOpen, persistLyricsOpen } from '@/lib/lyricsVisibility';
 import type { LyricLine } from '@/types/track';
 
 export type LyricsStatus = 'idle' | 'loading' | 'ready' | 'missing' | 'error';
@@ -37,11 +40,22 @@ const IDLE = {
 let loadRequest = 0;
 
 export const useLyricsStore = create<LyricsStoreState>((set) => ({
-  open: false,
+  // Restores the last shown/hidden choice so a restart reopens the lyrics
+  // page exactly where the user left it; every change is persisted below.
+  open: loadStoredLyricsOpen(),
   ...IDLE,
 
-  setOpen: (open) => set({ open }),
-  toggle: () => set((s) => ({ open: !s.open })),
+  setOpen: (open) => {
+    set({ open });
+    persistLyricsOpen(open);
+  },
+  toggle: () => {
+    set((s) => {
+      const open = !s.open;
+      persistLyricsOpen(open);
+      return { open };
+    });
+  },
 
   load: async (trackId) => {
     const request = ++loadRequest;
