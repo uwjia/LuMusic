@@ -43,6 +43,10 @@ const lyrics: Lyrics = {
   ],
 };
 
+/** `behavior` option of the Nth scrollTo call captured by the stub. */
+const behaviorOf = (scrollTo: ReturnType<typeof vi.fn>, call: number): string =>
+  (scrollTo.mock.calls[call][0] as { behavior: string }).behavior;
+
 const state = (over: Partial<PlayerState> = {}): PlayerState => ({
   status: 'playing',
   currentTrack: track,
@@ -151,6 +155,44 @@ describe('LyricsPage', () => {
       expect(scrollIntoView).not.toHaveBeenCalled();
       // Header stays mounted above the scroller (not scrolled away).
       expect(screen.getByTestId('lyrics-close')).toBeInTheDocument();
+    } finally {
+      delete proto.scrollTo;
+      delete proto.scrollIntoView;
+    }
+  });
+
+  it('wrapping back to the top scrolls instantly while forward progress glides', async () => {
+    // Repeat-one restart: the highlight jumps from the bottom line back to
+    // the top — animating across the entire list reads as noise, so the
+    // jump must snap (behavior 'instant'); forward steps keep 'smooth'.
+    const scrollTo = vi.fn();
+    const scrollIntoView = vi.fn();
+    const proto = Element.prototype as unknown as {
+      scrollTo?: (opts?: ScrollToOptions) => void;
+      scrollIntoView?: (opts?: ScrollIntoViewOptions) => void;
+    };
+    proto.scrollTo = scrollTo;
+    proto.scrollIntoView = scrollIntoView;
+
+    try {
+      vi.mocked(api.lyricsGet).mockResolvedValue(lyrics);
+      // 12s in → the last line is active (the body sits near the bottom).
+      usePlayerStore.setState({ state: state({ positionSecs: 12 }) });
+      render(<LyricsPage />);
+      await screen.findByText('I can feel my heart');
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(1));
+      expect(behaviorOf(scrollTo, 0)).toBe('smooth'); // intro → last line
+
+      // Song restarts (repeat one): last → first is backwards → instant.
+      usePlayerStore.setState({ state: state({ positionSecs: 1 }) });
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(2));
+      expect(behaviorOf(scrollTo, 1)).toBe('instant');
+
+      // Ordinary forward progress keeps the smooth glide.
+      usePlayerStore.setState({ state: state({ positionSecs: 4 }) });
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(3));
+      expect(behaviorOf(scrollTo, 2)).toBe('smooth');
+      expect(scrollIntoView).not.toHaveBeenCalled();
     } finally {
       delete proto.scrollTo;
       delete proto.scrollIntoView;

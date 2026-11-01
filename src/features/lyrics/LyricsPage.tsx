@@ -35,6 +35,14 @@ export function LyricsPage() {
   const active = activeLyricIndex(lines, positionSecs);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<HTMLElement | null>(null);
+  // Previous highlighted index; a backwards step means a wrap (repeat-one
+  // restart) or a manual seek back, where animating across the whole list
+  // is noise — those jumps snap instantly, forward progress glides.
+  const prevActiveRef = useRef(-1);
+  // A new track starts its highlight history over.
+  useEffect(() => {
+    prevActiveRef.current = -1;
+  }, [trackId]);
   useEffect(() => {
     const body = bodyRef.current;
     const line = activeRef.current;
@@ -46,10 +54,13 @@ export function LyricsPage() {
     // keeps the scroll contained. jsdom has no element scrolling, hence
     // the feature check.
     if (!body || !line || typeof body.scrollTo !== 'function') return;
+    const behavior: ScrollBehavior =
+      active < prevActiveRef.current ? 'instant' : 'smooth';
+    prevActiveRef.current = active;
     const bodyTop = body.getBoundingClientRect().top;
     const lineRect = line.getBoundingClientRect();
     const delta = lineRect.top - bodyTop - (body.clientHeight - lineRect.height) / 2;
-    body.scrollTo({ top: body.scrollTop + delta, behavior: 'smooth' });
+    body.scrollTo({ top: body.scrollTop + delta, behavior });
   }, [active]);
 
   return (

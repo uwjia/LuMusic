@@ -985,26 +985,16 @@ button {
   height: clamp(28px, 3vh, 40px);
 }
 
-/* Lyrics page shares the reveal-on-hover scrollbar behavior. */
+/* No scrollbar on the lyrics body: the page follows playback itself and
+   manual scrolling stays fully available (wheel / keyboard / click a
+   line), while the centered column and art background keep a clean edge
+   with no reserved gutter. */
+.lyrics-body {
+  scrollbar-width: none; /* Firefox / future spec */
+}
+
 .lyrics-body::-webkit-scrollbar {
-  width: 8px;
-}
-
-.lyrics-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.lyrics-body::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 4px;
-}
-
-.lyrics-body:hover::-webkit-scrollbar-thumb {
-  background: var(--bg-3);
-}
-
-.lyrics-body::-webkit-scrollbar-thumb:hover {
-  background: var(--fg-2);
+  display: none; /* WebView2 (Chromium) */
 }
 
 /* ---------- player bar ---------- */
