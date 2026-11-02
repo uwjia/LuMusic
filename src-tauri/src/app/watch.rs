@@ -56,28 +56,40 @@ enum Pending {
 }
 
 /// Records an event into the pending batch (last write wins).
+///
+/// Rename events come in two shapes: a single combined event with
+/// `[from, to]` (`RenameMode::Both`), or **two separate events** — the
+/// Windows backend emits `RenameMode::From` with `[old]` and then
+/// `RenameMode::To` with `[new]`. The `From` half is what makes the old
+/// id vanish; treating it as a generic change would drop the path at
+/// flush time (it no longer exists) and leave the old entry in the
+/// library forever.
 fn record(pending: &mut HashMap<PathBuf, Pending>, event: &Event) {
-    let removed = matches!(event.kind, EventKind::Remove(_));
-    let rename = matches!(event.kind, EventKind::Modify(ModifyKind::Name(_)));
-    match (rename, event.paths.as_slice()) {
-        // Rename events carry [from, to]: the source path is gone, the
-        // target is new.
-        (true, [from, to]) => {
-            pending.insert(from.clone(), Pending::Removed);
-            pending.insert(to.clone(), Pending::Changed);
+    use notify::event::RenameMode;
+    let mark = |pending: &mut HashMap<PathBuf, Pending>, state: Pending| {
+        for path in &event.paths {
+            pending.insert(path.clone(), state);
         }
-        _ => {
-            for path in &event.paths {
-                pending.insert(
-                    path.clone(),
-                    if removed {
-                        Pending::Removed
-                    } else {
-                        Pending::Changed
-                    },
-                );
+    };
+    match &event.kind {
+        EventKind::Remove(_) => mark(pending, Pending::Removed),
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+            mark(pending, Pending::Removed);
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+            mark(pending, Pending::Changed);
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+            if let [from, rest @ ..] = event.paths.as_slice() {
+                pending.insert(from.clone(), Pending::Removed);
+                for path in rest {
+                    pending.insert(path.clone(), Pending::Changed);
+                }
             }
         }
+        // Anything else (creates, writes, metadata, ambiguous renames):
+        // the disk arbitrates at flush time.
+        _ => mark(pending, Pending::Changed),
     }
 }
 
@@ -86,16 +98,35 @@ fn record(pending: &mut HashMap<PathBuf, Pending>, event: &Event) {
 /// again is really a refresh. Directories never refresh (their files
 /// carry their own events); a removed path may be a file or a gone
 /// directory — the merge prunes both.
+///
+/// The exists() check is case-insensitive on Windows, so a rename that
+/// only changes capitalization still "exists" — those removals are kept
+/// whenever a refresh of the same path (ignoring case) is in the batch.
 fn partition(pending: HashMap<PathBuf, Pending>) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut refresh = Vec::new();
-    let mut removed = Vec::new();
+    let mut removed_candidates = Vec::new();
     for (path, kind) in pending {
         match kind {
             Pending::Changed if path.is_file() => refresh.push(path),
-            Pending::Removed if !path.exists() => removed.push(path),
-            Pending::Changed | Pending::Removed => {}
+            Pending::Removed => removed_candidates.push(path),
+            Pending::Changed => {}
         }
     }
+    // Removed paths that exist again are recreations, not removals — with
+    // one exception: a rename that only changes capitalization still
+    // "exists" on the case-insensitive Windows filesystem. When the same
+    // path (ignoring case) refreshes in this batch, treat it as the
+    // rename it is, or the library keeps both spellings.
+    let same_path_ignoring_case = |a: &Path, b: &Path| {
+        crate::domain::scan::path_is_at_or_under(a, b)
+            && crate::domain::scan::path_is_at_or_under(b, a)
+    };
+    let removed: Vec<PathBuf> = removed_candidates
+        .into_iter()
+        .filter(|gone| {
+            !gone.exists() || refresh.iter().any(|fresh| same_path_ignoring_case(fresh, gone))
+        })
+        .collect();
     (refresh, removed)
 }
 
@@ -439,6 +470,56 @@ mod tests {
         );
         assert_eq!(pending.get(Path::new("C:/m/old.mp3")), Some(&Pending::Removed));
         assert_eq!(pending.get(Path::new("C:/m/new.mp3")), Some(&Pending::Changed));
+    }
+
+    /// The Windows backend emits renames as TWO separate events —
+    /// `RenameMode::From` with `[old]`, then `RenameMode::To` with
+    /// `[new]`. The From half must record a removal: dropped as a generic
+    /// "change", the vanished path was silently discarded at flush time
+    /// and the old file name stayed in the library forever.
+    #[test]
+    fn record_marks_separate_from_and_to_rename_events() {
+        let mut pending = HashMap::new();
+        record(
+            &mut pending,
+            &event(
+                EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+                &["C:/m/old.mp3"],
+            ),
+        );
+        record(
+            &mut pending,
+            &event(
+                EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+                &["C:/m/new.mp3"],
+            ),
+        );
+        assert_eq!(pending.get(Path::new("C:/m/old.mp3")), Some(&Pending::Removed));
+        assert_eq!(pending.get(Path::new("C:/m/new.mp3")), Some(&Pending::Changed));
+    }
+
+    /// A case-only rename (X.mp3 -> x.mp3) still "exists" on the
+    /// case-insensitive Windows filesystem, so the disk check would
+    /// normally drop the removal — keep it when the same path (ignoring
+    /// case) refreshes in the same batch, or the library keeps both
+    /// spellings.
+    #[test]
+    fn partition_keeps_removals_of_case_only_renames() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let lower = dir.path().join("song.mp3");
+        std::fs::write(&lower, b"x").unwrap();
+        let upper = dir.path().join("Song.mp3");
+
+        let mut pending = HashMap::new();
+        pending.insert(upper.clone(), Pending::Removed);
+        pending.insert(lower.clone(), Pending::Changed);
+        let (refresh, removed) = partition(pending);
+        assert_eq!(refresh, vec![lower]);
+        assert_eq!(
+            removed,
+            vec![upper],
+            "the old spelling must be pruned alongside the refresh"
+        );
     }
 
     #[test]
