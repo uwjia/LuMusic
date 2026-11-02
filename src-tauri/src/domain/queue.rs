@@ -72,6 +72,25 @@ impl Queue {
         }
     }
 
+    /// Appends tracks to the queue's tail without touching the current
+    /// position: sequential play continues into them after the existing
+    /// tracks; under shuffle the new indices are shuffled and queued after
+    /// everything not yet played, so nothing replays and nothing is skipped
+    /// (a full rebuild would re-deal already-played tracks before them).
+    pub fn append(&mut self, new_items: Vec<TrackId>, shuffle_seed: u64) {
+        if new_items.is_empty() {
+            return;
+        }
+        let start = self.items.len();
+        self.items.extend(new_items);
+        let mut new_order: Vec<usize> = (start..self.items.len()).collect();
+        if self.shuffle {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(shuffle_seed);
+            new_order.shuffle(&mut rng);
+        }
+        self.play_order.extend(new_order);
+    }
+
     pub fn items(&self) -> &[TrackId] {
         &self.items
     }
@@ -322,5 +341,38 @@ mod tests {
         assert_eq!(q.current(), Some("y".into()));
         assert_eq!(q.repeat(), RepeatMode::All);
         assert_eq!(q.advance(false), AdvanceOutcome::Playing("x".into()));
+    }
+
+    #[test]
+    fn append_extends_a_sequential_queue_after_existing_tracks() {
+        let mut q = Queue::new(ids(2), Some(0));
+        q.append(vec!["t2".into(), "t3".into()], 42);
+        assert_eq!(q.len(), 4);
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("t1".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("t2".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("t3".into()));
+        // Only after the appended tracks does repeat-off stop.
+        assert_eq!(q.advance(false), AdvanceOutcome::Stopped);
+    }
+
+    #[test]
+    fn append_under_shuffle_plays_every_track_exactly_once() {
+        let mut q = Queue::new(ids(3), Some(1));
+        q.set_shuffle(true, 7);
+        q.append(vec!["n0".into(), "n1".into()], 9);
+        assert_eq!(q.len(), 5);
+        let mut played = vec![q.current().expect("current survives the append")];
+        for _ in 0..4 {
+            match q.advance(false) {
+                AdvanceOutcome::Playing(id) => played.push(id),
+                AdvanceOutcome::Stopped => panic!("appended queue must not stop early"),
+            }
+        }
+        // Five distinct tracks: the three originals plus both appended ones.
+        let mut distinct = played.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 5);
+        assert!(played.contains(&"n0".to_string()) && played.contains(&"n1".to_string()));
     }
 }

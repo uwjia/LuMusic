@@ -12,7 +12,7 @@ use super::service::{PlayerError, PlayerService};
 use super::state::SharedService;
 use super::tray::{TrayController, TrayLabels};
 use crate::domain::equalizer::EqSettings;
-use crate::domain::library::TrackQuery;
+use crate::domain::library::{ImportSummary, TrackQuery};
 use crate::domain::playlist::Playlist;
 use crate::domain::queue::RepeatMode;
 use crate::domain::scan::ScanSummary;
@@ -106,6 +106,35 @@ pub async fn scan_library(
 
     let _ = app.emit(ev::EVENT_LIBRARY_UPDATED, &summary);
     Ok(summary)
+}
+
+/// Imports files dropped onto the window (drag-and-drop from the file
+/// manager) into the library, optionally appending them to a playlist.
+///
+/// Same two-phase shape as `scan_library`: metadata reads (potentially
+/// slow disk IO) run on a blocking thread without the service lock, the
+/// merge step locks briefly. No event is emitted — the command's response
+/// drives the caller's refresh.
+#[tauri::command]
+pub async fn import_files(
+    state: State<'_, SharedService>,
+    paths: Vec<String>,
+    playlist_id: Option<String>,
+) -> Result<ImportSummary, String> {
+    let (_scanner, metadata) = {
+        let service = state.lock().map_err(|_| "service poisoned")?;
+        service.adapters()
+    };
+    let service = state.inner().clone();
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<ImportSummary, String> {
+        let path_bufs: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+        let (tracks, warnings) = PlayerService::read_import_files(metadata.as_ref(), &path_bufs);
+        let mut service = service.lock().map_err(|_| "service poisoned".to_string())?;
+        service.apply_import(tracks, warnings, playlist_id.as_deref()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Lists tracks matching the query.

@@ -70,6 +70,28 @@ export interface ScanProgress {
   total: number;
 }
 
+/** Result of a drag-and-drop import (mirrors `ImportSummary` in domain/library.rs). */
+export interface ImportSummary {
+  /** Files that entered the library (added or refreshed). */
+  imported: number;
+  /** Files actually appended to the target playlist (dupes not counted). */
+  addedToPlaylist: number;
+  /** Files skipped (unsupported format or unreadable). */
+  skipped: number;
+  warnings: string[];
+}
+
+/**
+ * Native file drag-and-drop on the window (Tauri webview events; HTML5
+ * DnD is disabled while the OS handler is active). `over` carries no
+ * paths — only the drop does.
+ */
+export type DragDropEvent =
+  | { type: 'enter'; paths: string[] }
+  | { type: 'over' }
+  | { type: 'drop'; paths: string[] }
+  | { type: 'leave' };
+
 export interface Settings {
   volume: number;
   lastFolder: string | null;

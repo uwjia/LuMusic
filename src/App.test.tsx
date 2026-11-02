@@ -22,6 +22,7 @@ vi.mock('@/api', () => {
       lyricsGet: vi.fn(),
       traySetLabels: vi.fn(async () => undefined),
       onSpectrum: vi.fn(unsubscribe),
+      onDragDrop: vi.fn(unsubscribe),
       onPlayerState: vi.fn(unsubscribe),
       onProgress: vi.fn(unsubscribe),
       onScanProgress: vi.fn(unsubscribe),

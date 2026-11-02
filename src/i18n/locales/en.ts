@@ -137,7 +137,10 @@ export const en = {
   'playlist.openInExplorer': 'Open in Explorer',
   'playlist.delete': 'Delete playlist',
   'playlist.empty': 'This playlist is empty',
-  'playlist.emptyHint': 'Add tracks from the library using the ＋ button on each row.',
+  'playlist.emptyHint':
+    'Drag audio files from the file manager onto the window to add them to this playlist.',
+  'playlist.dropToPlaylist': 'Drop audio files to add them to this playlist',
+  'playlist.dropToLibrary': 'Drop audio files to import them into the library',
   'playlist.removeTrack': 'Remove {title} from playlist',
   'playlist.removeConfirmTitle': 'Remove track?',
   'playlist.removeConfirmMessage':

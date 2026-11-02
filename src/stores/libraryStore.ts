@@ -2,7 +2,14 @@
 
 import { create } from 'zustand';
 import { api } from '@/api';
-import type { ScanProgress, ScanSummary, SortField, Track, TrackQuery } from '@/types/track';
+import type {
+  ImportSummary,
+  ScanProgress,
+  ScanSummary,
+  SortField,
+  Track,
+  TrackQuery,
+} from '@/types/track';
 
 export const DEFAULT_QUERY: TrackQuery = {
   search: null,
@@ -22,6 +29,8 @@ interface LibraryStoreState {
   setSearch: (search: string) => Promise<void>;
   toggleSort: (field: SortField) => Promise<void>;
   scan: (root: string) => Promise<boolean>;
+  /** Drag-and-drop import; refreshes the track list on success. */
+  importFiles: (paths: string[], playlistId?: string) => Promise<ImportSummary | null>;
   applyScanProgress: (progress: ScanProgress) => void;
   applyScanDone: (summary: ScanSummary) => void;
 }
@@ -73,6 +82,20 @@ export const useLibraryStore = create<LibraryStoreState>((set, get) => ({
         error: err instanceof Error ? err.message : String(err),
       });
       return false;
+    }
+  },
+
+  // Skipped files are part of the contract (the drop carries whatever the
+  // file manager handed over); only a failed command is an error.
+  importFiles: async (paths, playlistId) => {
+    set({ error: null });
+    try {
+      const summary = await api.libraryImport(paths, playlistId);
+      if (summary.imported > 0) await get().load();
+      return summary;
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+      return null;
     }
   },
 

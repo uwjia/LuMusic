@@ -16,6 +16,19 @@ pub struct TrackQuery {
     pub descending: bool,
 }
 
+/// Outcome of a drag-and-drop file import, surfaced to the UI.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSummary {
+    /// Files that entered the library (added or refreshed).
+    pub imported: usize,
+    /// Files actually appended to the target playlist (dupes not counted).
+    pub added_to_playlist: usize,
+    /// Files skipped (unsupported format or unreadable).
+    pub skipped: usize,
+    pub warnings: Vec<String>,
+}
+
 /// In-memory track catalog keyed by `TrackId`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LibraryIndex {

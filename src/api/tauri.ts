@@ -3,6 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { EventCallback } from '@tauri-apps/api/event';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 import type { PlayerApi, Unsubscribe } from '@/api/types';
 import {
@@ -40,6 +41,8 @@ export const tauriApi: PlayerApi = {
   appInfo: () => invoke('app_info'),
 
   scanLibrary: (root) => invoke('scan_library', { root }),
+  libraryImport: (paths, playlistId) =>
+    invoke('import_files', { paths, playlistId: playlistId ?? null }),
   getTracks: (query) =>
     invoke('get_tracks', {
       query: { search: null, sort: 'title', descending: false, ...query },
@@ -84,4 +87,34 @@ export const tauriApi: PlayerApi = {
   onScanProgress: (cb) => wire<ScanProgress>(LIBRARY_SCAN_PROGRESS_EVENT, cb),
   onLibraryUpdated: (cb) => wire<ScanSummary>(LIBRARY_UPDATED_EVENT, cb),
   onSpectrum: (cb) => wire<SpectrumFrame>(SPECTRUM_EVENT, cb),
+
+  onDragDrop: (cb) => {
+    // The webview's own drag handler (dragDropEnabled): HTML5 DnD never
+    // fires in the packaged app, but the native events carry the absolute
+    // paths the import command needs.
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === 'enter' || payload.type === 'drop') {
+          cb({ type: payload.type, paths: payload.paths });
+        } else if (payload.type === 'over') {
+          cb({ type: 'over' });
+        } else {
+          cb({ type: 'leave' });
+        }
+      })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  },
 };

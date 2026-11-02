@@ -218,3 +218,65 @@ describe('mock lyrics seam', () => {
     expect(await mockApi.lyricsGet('t2')).toBeNull();
   });
 });
+
+describe('mock import seam', () => {
+  // Runs last on purpose: imports mutate the singleton's track list, and
+  // the earlier describes pin exact library counts.
+  it('imports supported files, skips the rest and dedupes playlist adds', async () => {
+    const playlist = await mockApi.playlistCreate('Drop Zone');
+    const summary = await mockApi.libraryImport(
+      ['C:/drop/lost tape.mp3', 'C:/drop/readme.txt'],
+      playlist.id,
+    );
+    expect(summary).toMatchObject({ imported: 1, addedToPlaylist: 1, skipped: 1 });
+    expect(summary.warnings[0]).toContain('readme.txt');
+    expect(mockApi.imported).toEqual(['C:/drop/lost tape.mp3']);
+    // Title mirrors Track::from_stem: the file name without extension.
+    expect(await mockApi.playlistGetTracks(playlist.id)).toMatchObject([
+      { id: 'C:/drop/lost tape.mp3', title: 'lost tape' },
+    ]);
+
+    // Re-import refreshes the library entry but appends no duplicate.
+    const again = await mockApi.libraryImport(['C:/drop/lost tape.mp3'], playlist.id);
+    expect(again).toMatchObject({ imported: 1, addedToPlaylist: 0, skipped: 0 });
+    expect(await mockApi.playlistGetTracks(playlist.id)).toHaveLength(1);
+  });
+
+  it('rejects an unknown playlist like the backend does', async () => {
+    await expect(mockApi.libraryImport(['C:/drop/x.mp3'], 'ghost')).rejects.toThrow(
+      'playlist not found',
+    );
+  });
+
+  it('never fires drag events (a browser page sees no OS drops)', () => {
+    const seen: string[] = [];
+    const unsubscribe = mockApi.onDragDrop((event) => seen.push(event.type));
+    expect(seen).toEqual([]);
+    unsubscribe();
+  });
+});
+
+describe('mock import queue sync', () => {
+  it('extends the live queue when importing into the playing playlist', async () => {
+    const playlist = await mockApi.playlistCreate('Queue Mix');
+    await mockApi.playlistAddTrack(playlist.id, 't1');
+    await mockApi.playerLoad(['t1'], 0, playlist.id);
+
+    await mockApi.libraryImport(['C:/drop/q1.mp3'], playlist.id);
+    // The queue grew with the import: "next" reaches the new track.
+    expect((await mockApi.playerState()).queueLen).toBe(2);
+    const next = await mockApi.playerNext();
+    expect(next.currentTrack?.id).toBe('C:/drop/q1.mp3');
+    await mockApi.playerStop();
+  });
+
+  it('leaves queues from other sources untouched', async () => {
+    const playlist = await mockApi.playlistList();
+    const other = playlist.find((p) => p.name === 'Default')!;
+    await mockApi.playerLoad(other.items, 0, other.id);
+    const mix = await mockApi.playlistCreate('Unrelated Mix');
+    await mockApi.libraryImport(['C:/drop/q2.mp3'], mix.id);
+    expect((await mockApi.playerState()).queueLen).toBe(other.items.length);
+    await mockApi.playerStop();
+  });
+});

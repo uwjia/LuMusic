@@ -3,6 +3,8 @@
 // (tests + `npm run dev:mock` browser development).
 
 import type {
+  DragDropEvent,
+  ImportSummary,
   Lyrics,
   PlayerState,
   Playlist,
@@ -25,6 +27,12 @@ export interface PlayerApi {
   // library
   scanLibrary(root: string): Promise<ScanSummary>;
   getTracks(query?: Partial<TrackQuery>): Promise<Track[]>;
+  /**
+   * Imports dropped local files into the library (metadata read + upsert),
+   * optionally appending them to a playlist. Unsupported/unreadable files
+   * are skipped and reported in the summary.
+   */
+  libraryImport(paths: string[], playlistId?: string): Promise<ImportSummary>;
 
   // playback (each control returns the resulting state)
   playerState(): Promise<PlayerState>;
@@ -74,4 +82,6 @@ export interface PlayerApi {
   onLibraryUpdated(cb: (summary: ScanSummary) => void): Unsubscribe;
   /** Spectrum frames (~20 Hz, only while playing). */
   onSpectrum(cb: (frame: SpectrumFrame) => void): Unsubscribe;
+  /** Native file drag-and-drop on the window (paths are absolute). */
+  onDragDrop(cb: (event: DragDropEvent) => void): Unsubscribe;
 }

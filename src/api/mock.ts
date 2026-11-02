@@ -7,7 +7,9 @@
 
 import type { PlayerApi, Unsubscribe } from '@/api/types';
 import type {
+  DragDropEvent,
   EqSettings,
+  ImportSummary,
   Lyrics,
   PlayerState,
   Playlist,
@@ -22,6 +24,9 @@ import type {
   TrayLabels,
 } from '@/types/track';
 import { SPECTRUM_BARS } from '@/types/track';
+
+// Mirrors domain::scan::SUPPORTED_EXTENSIONS — the import's format filter.
+const SUPPORTED_EXTENSIONS = ['mp3', 'flac', 'wav', 'ogg', 'oga'];
 
 const TRACKS_ROOT = 'C:/mock-music';
 
@@ -259,6 +264,63 @@ class MockApi implements PlayerApi {
     };
     this.libraryEvents.emit(summary);
     return summary;
+  }
+
+  /** Dropped paths imported so far (test/dev observability seam). */
+  private importedPaths: string[] = [];
+
+  get imported(): readonly string[] {
+    return this.importedPaths;
+  }
+
+  async libraryImport(paths: string[], playlistId?: string): Promise<ImportSummary> {
+    // Mirrors the backend command: filter by extension, upsert into the
+    // library, optionally append to a playlist (dupes not re-added).
+    const playlist = playlistId
+      ? (this.playlists.find((p) => p.id === playlistId) ??
+        (() => {
+          throw new Error(`playlist not found: ${playlistId}`);
+        })())
+      : null;
+    const warnings: string[] = [];
+    let imported = 0;
+    let addedToPlaylist = 0;
+    for (const path of paths) {
+      const extension = path.split('.').pop()?.toLowerCase() ?? '';
+      if (!path.includes('.') || !SUPPORTED_EXTENSIONS.includes(extension)) {
+        warnings.push(`skipped '${path}': not a supported audio file`);
+        continue;
+      }
+      // Mirrors Track::from_stem — the id is the path, the title the stem.
+      const fileName = path.split(/[\\/]/).pop() ?? path;
+      const track: Track = {
+        id: path,
+        title: fileName.slice(0, fileName.length - extension.length - 1),
+        artist: null,
+        album: null,
+        albumArtist: null,
+        trackNo: null,
+        discNo: null,
+        year: null,
+        genre: null,
+        durationSecs: null,
+        filePath: path,
+        sizeBytes: 0,
+      };
+      this.tracks = [...this.tracks.filter((t) => t.id !== track.id), track];
+      this.importedPaths.push(path);
+      imported += 1;
+      if (playlist && !playlist.items.includes(track.id)) {
+        playlist.items.push(track.id);
+        addedToPlaylist += 1;
+        // Mirrors the backend: appending to the playlist the live queue was
+        // loaded from extends that queue, so "next" reaches the import.
+        if (this.queueSource === playlist.id && this.queue.length > 0) {
+          this.queue.push(track);
+        }
+      }
+    }
+    return { imported, addedToPlaylist, skipped: warnings.length, warnings };
   }
 
   async getTracks(query?: Partial<TrackQuery>): Promise<Track[]> {
@@ -530,6 +592,13 @@ class MockApi implements PlayerApi {
 
   onSpectrum(cb: (frame: SpectrumFrame) => void) {
     return this.spectrumEvents.on(cb);
+  }
+
+  onDragDrop(_cb: (event: DragDropEvent) => void) {
+    // A browser page cannot observe OS file drops with absolute paths
+    // (the real app uses the webview's native drag handler), so the mock
+    // never fires; `libraryImport` stays directly testable.
+    return () => {};
   }
 }
 

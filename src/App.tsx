@@ -8,6 +8,7 @@ import { PlayerBar } from '@/features/player/PlayerBar';
 import { PlaylistPage } from '@/features/playlists/PlaylistPage';
 import { SpectrumPanel } from '@/features/player/SpectrumPanel';
 import { Sidebar } from '@/features/playlists/Sidebar';
+import { DropZone } from '@/features/shell/DropZone';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { TitleBar } from '@/features/shell/TitleBar';
 import { usePlayerEvents } from '@/hooks/usePlayerEvents';
@@ -65,6 +66,7 @@ export default function App() {
           </>
         )}
         {spectrumOpen ? <SpectrumPanel /> : null}
+        <DropZone targetPlaylistId={view.kind === 'playlist' && !lyricsOpen ? view.id : null} />
       </main>
       <PlayerBar />
     </div>

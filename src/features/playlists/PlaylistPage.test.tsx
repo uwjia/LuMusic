@@ -102,6 +102,16 @@ describe('PlaylistPage', () => {
     expect(screen.getByText('Playlist not found')).toBeInTheDocument();
   });
 
+  it('the empty state teaches the drag-and-drop import', () => {
+    usePlaylistStore.setState({ selectedTracks: [] });
+    render(<PlaylistPage playlistId="p1" />);
+    expect(
+      screen.getByText(
+        'Drag audio files from the file manager onto the window to add them to this playlist.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('playing a row names this playlist as the queue source', async () => {
     // The source reaches the backend, is persisted with the session and
     // comes back inside the state — the sidebar speaker survives restarts.

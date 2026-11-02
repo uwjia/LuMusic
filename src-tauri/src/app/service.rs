@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use super::dto::{LyricsDto, PlaybackStatus, PlayerStateDto};
 use crate::domain::equalizer::EqSettings;
-use crate::domain::library::{LibraryIndex, TrackQuery};
+use crate::domain::library::{ImportSummary, LibraryIndex, TrackQuery};
 use crate::domain::lyrics;
 use crate::domain::playlist::{Playlist, PlaylistCollection, PlaylistError};
 use crate::domain::queue::{AdvanceOutcome, Queue, RepeatMode};
@@ -315,6 +315,91 @@ impl PlayerService {
             tracing::warn!("failed to persist settings: {err}");
         }
         summary
+    }
+
+    /// Drag-and-drop import: reads metadata for the dropped files (run
+    /// outside the service lock by the command, like the scan's phase 1).
+    /// Non-audio and unreadable files are skipped with a warning — a drop
+    /// carries whatever the file manager handed over, never a curated list.
+    pub fn read_import_files(
+        metadata: &dyn MetadataReader,
+        paths: &[PathBuf],
+    ) -> (Vec<Track>, Vec<String>) {
+        let mut tracks = Vec::with_capacity(paths.len());
+        let mut warnings = Vec::new();
+        for path in paths {
+            if !crate::domain::scan::is_audio_file(path) {
+                if warnings.len() < 100 {
+                    warnings
+                        .push(format!("skipped '{}': not a supported audio file", path.display()));
+                }
+                continue;
+            }
+            match metadata.read_track(path) {
+                Ok(track) => tracks.push(track),
+                Err(err) => {
+                    if warnings.len() < 100 {
+                        warnings.push(format!("skipped '{}': {err}", path.display()));
+                    }
+                }
+            }
+        }
+        (tracks, warnings)
+    }
+
+    /// Merge step of the import: upserts the tracks into the library and
+    /// appends them to `playlist_id` when given. The playlist is validated
+    /// up front so a bad id mutates nothing. Unlike a scan this must NOT
+    /// prune — imported files may legitimately live outside the scan root.
+    pub fn apply_import(
+        &mut self,
+        tracks: Vec<Track>,
+        warnings: Vec<String>,
+        playlist_id: Option<&str>,
+    ) -> Result<ImportSummary, PlayerError> {
+        if let Some(id) = playlist_id {
+            if self.playlists.get(id).is_none() {
+                return Err(PlayerError::Playlist(PlaylistError::NotFound(id.to_string())));
+            }
+        }
+        let mut summary = ImportSummary {
+            skipped: warnings.len(),
+            warnings,
+            ..ImportSummary::default()
+        };
+        // The live queue is a snapshot from load time; when the import
+        // appends to the very playlist that queue was loaded from, the new
+        // tracks must join it — otherwise "next" walks the stale queue to
+        // its end and stops, never reaching the just-imported files.
+        let syncs_live_queue =
+            playlist_id.is_some() && !self.queue.is_empty() && self.queue_source.as_deref() == playlist_id;
+        let mut queue_additions: Vec<TrackId> = Vec::new();
+        for track in tracks {
+            self.library.upsert(track.clone());
+            summary.imported += 1;
+            if let Some(id) = playlist_id {
+                if self.playlists.add_track(id, track.id.clone())? {
+                    summary.added_to_playlist += 1;
+                    if syncs_live_queue {
+                        queue_additions.push(track.id.clone());
+                    }
+                }
+            }
+        }
+        if !queue_additions.is_empty() {
+            self.shuffle_seed += 1;
+            self.queue.append(queue_additions, self.shuffle_seed);
+            self.save_playback_session();
+        }
+        if summary.imported > 0 {
+            if let Err(err) = self.persistence.save_library(&self.library) {
+                tracing::warn!("failed to persist library: {err}");
+            }
+        }
+        if playlist_id.is_some() {
+            self.persist_playlists()?;
+        }
+        Ok(summary)
     }
 
     // ----- playback -----
@@ -670,6 +755,21 @@ mod tests {
         }
     }
 
+    /// Metadata mock that fails for a configured set of paths — used to pin
+    /// the drag-and-drop import's skip behavior for unreadable files.
+    struct PickyMetadata {
+        fail: std::collections::HashSet<String>,
+    }
+
+    impl MetadataReader for PickyMetadata {
+        fn read_track(&self, path: &Path) -> Result<Track, MetadataError> {
+            if self.fail.contains(&path.to_string_lossy().into_owned()) {
+                return Err(MetadataError::Io(std::io::Error::other("read denied")));
+            }
+            MockMetadata.read_track(path)
+        }
+    }
+
     /// Serves raw LRC text per audio path (association + parsing stay real).
     #[derive(Default)]
     struct MockLyricSource {
@@ -891,6 +991,147 @@ mod tests {
             })
             .collect();
         service.apply_scan(Path::new("C:/lib"), files.len(), tracks, Vec::new())
+    }
+
+    // ---------- drag-and-drop import ----------
+
+    fn imported_track(path: &str) -> Track {
+        let mut track = Track::from_stem(Path::new(path), 7);
+        track.duration_secs = Some(10.0);
+        track
+    }
+
+    #[test]
+    fn read_import_files_filters_non_audio_and_reports_failures() {
+        let metadata = PickyMetadata {
+            fail: ["C:/d/broken.flac".to_string()].into(),
+        };
+        let (tracks, warnings) = PlayerService::read_import_files(
+            &metadata,
+            &[
+                PathBuf::from("C:/d/a.mp3"),
+                PathBuf::from("C:/d/notes.txt"),
+                PathBuf::from("C:/d/broken.flac"),
+            ],
+        );
+        assert_eq!(tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["C:/d/a.mp3"]);
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].contains("notes.txt"));
+    }
+
+    #[test]
+    fn import_adds_to_library_and_playlist_and_survives_restart() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        let playlist = service.create_playlist("Chill").unwrap();
+        let summary =
+            service.apply_import(vec![imported_track("C:/Downloads/x.mp3")], Vec::new(), Some(&playlist.id));
+        assert_eq!(
+            summary.unwrap(),
+            ImportSummary {
+                imported: 1,
+                added_to_playlist: 1,
+                skipped: 0,
+                warnings: Vec::new(),
+            }
+        );
+        // Outside the scan root and still no pruning: a.mp3/b.mp3 stay.
+        assert!(service.get_track("C:/Downloads/x.mp3").is_some());
+        assert_eq!(service.library_len(), 3);
+
+        // Re-importing the same file refreshes the library but appends
+        // nothing (playlist additions are deduped like manual ones).
+        let summary =
+            service.apply_import(vec![imported_track("C:/Downloads/x.mp3")], Vec::new(), Some(&playlist.id));
+        let summary = summary.unwrap();
+        assert_eq!((summary.imported, summary.added_to_playlist), (1, 0));
+
+        drop(service);
+        let reloaded = reloaded_service(dir.path());
+        assert!(reloaded.get_track("C:/Downloads/x.mp3").is_some());
+        let chill = reloaded
+            .playlists()
+            .into_iter()
+            .find(|p| p.name == "Chill")
+            .unwrap();
+        assert_eq!(chill.items, vec!["C:/Downloads/x.mp3".to_string()]);
+    }
+
+    #[test]
+    fn import_without_playlist_only_touches_the_library() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        let summary =
+            service.apply_import(vec![imported_track("C:/solo/y.mp3")], vec!["skipped 'z.txt'".into()], None)
+                .unwrap();
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.added_to_playlist, 0);
+        assert_eq!(summary.skipped, 1);
+    }
+
+    #[test]
+    fn import_into_a_missing_playlist_mutates_nothing() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        let before = service.library_len();
+        assert!(matches!(
+            service.apply_import(
+                vec![imported_track("C:/Downloads/x.mp3")],
+                Vec::new(),
+                Some("ghost")
+            ),
+            Err(PlayerError::Playlist(PlaylistError::NotFound(_)))
+        ));
+        assert_eq!(service.library_len(), before);
+    }
+
+    #[test]
+    fn import_into_the_playing_playlist_extends_the_live_queue() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        let playlist = service.create_playlist("Chill").unwrap();
+        service
+            .add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into())
+            .unwrap();
+        service
+            .add_track_to_playlist(&playlist.id, "C:/lib/b.mp3".into())
+            .unwrap();
+        // Queue loaded from Chill with a.mp3 playing.
+        service
+            .play_queue(
+                vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()],
+                Some(0),
+                Some(playlist.id.clone()),
+            )
+            .unwrap();
+
+        service
+            .apply_import(
+                vec![imported_track("C:/Downloads/new.mp3")],
+                Vec::new(),
+                Some(&playlist.id),
+            )
+            .unwrap();
+        assert_eq!(service.state().queue_len, 3);
+        // "Next" now walks into the imported track instead of stopping
+        // at the stale queue's end.
+        service.next().unwrap();
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/b.mp3");
+        service.next().unwrap();
+        assert_eq!(service.state().current_track.unwrap().id, "C:/Downloads/new.mp3");
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+    }
+
+    #[test]
+    fn import_leaves_queues_from_other_sources_alone() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        // Library playback (no source playlist).
+        service.play_queue(vec!["C:/lib/a.mp3".into()], Some(0), None).unwrap();
+        let playlist = service.create_playlist("Chill").unwrap();
+        service
+            .apply_import(
+                vec![imported_track("C:/Downloads/new.mp3")],
+                Vec::new(),
+                Some(&playlist.id),
+            )
+            .unwrap();
+        assert_eq!(service.state().queue_len, 1);
     }
 
     #[test]

@@ -39,6 +39,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app::commands::app_info,
             app::commands::scan_library,
+            app::commands::import_files,
             app::commands::get_tracks,
             app::commands::lyrics_get,
             app::commands::player_state,
