@@ -9,8 +9,22 @@ use super::playlist::AutoPlaylistSpec;
 use super::track::TrackId;
 
 /// File extensions the audio stack can decode (keep in sync with symphonia
-/// features enabled in Cargo.toml).
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "ogg", "oga"];
+/// features enabled in Cargo.toml). Deliberately NOT listed: `.aac` (raw
+/// ADTS — symphonia 0.5 has no ADTS reader), `.mp4` (a video container;
+/// scanning it would pull movies into a music library) and APE/WavPack/
+/// DSD/Opus (no upstream decoder).
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "mp3",
+    "flac",
+    "wav",
+    "ogg",
+    "oga",
+    // M4A = MP4 container with AAC or ALAC audio.
+    "m4a",
+    // AIFF (PCM).
+    "aif",
+    "aiff",
+];
 
 /// Returns true when the extension is a supported audio format
 /// (case-insensitive).
@@ -174,14 +188,35 @@ mod tests {
 
     #[test]
     fn is_audio_file_matches_supported_extensions_case_insensitively() {
-        for name in ["a.mp3", "b.Flac", "C.WAV", "d.ogg", "e.oga"] {
+        for name in [
+            "a.mp3",
+            "b.Flac",
+            "C.WAV",
+            "d.ogg",
+            "e.oga",
+            // M4A (AAC/ALAC in an MP4 container) and AIFF joined the set.
+            "f.m4a",
+            "g.M4A",
+            "h.aif",
+            "i.AIFF",
+        ] {
             assert!(is_audio_file(Path::new(name)), "{name} should match");
         }
     }
 
     #[test]
     fn is_audio_file_rejects_unsupported_or_missing_extensions() {
-        for name in ["a.txt", "b.m4a", "c.opus", "noext", "a.mp3.bak"] {
+        for name in [
+            "a.txt",
+            "b.ape",
+            "c.opus",
+            "noext",
+            "a.mp3.bak",
+            // Raw ADTS has no symphonia reader, and the video container
+            // must not sweep movies into a music library.
+            "d.aac",
+            "e.mp4",
+        ] {
             assert!(!is_audio_file(Path::new(name)), "{name} should not match");
         }
     }

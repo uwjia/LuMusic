@@ -128,3 +128,5 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 （系统媒体会话已实现：`app/media.rs` 经 `souvlaki`（SMTC/MPRIS，唯一纯 Rust 适配器）接 OS 层——`emit_state` 与 poller 进度分频同时推送元数据/状态/时间轴（元数据仅曲目变更时重发，避免时间轴重置）；硬件媒体键/锁屏/耳机按键回调经与托盘相同的 service 方法回放（Play/Play 一律不暂停、SeekBy/SetPosition 换算为 seek）；`MediaSnapshot`/`seek_target` 为纯函数可测，souvlaki 调用本身是薄壳。Windows 需 `window.hwnd()`，失败仅降级无 OS 集成。）
 
 （淡入淡出已实现：`infra/audio/fade.rs` `SharedFade`（f32 位原子 + 线性 ramp，按采样率换算步长）+ `FadeSource` 源包装（静息时增益恰为 1.0，位透明）；每个新源淡入 120ms、暂停先淡出后由**代数计数取消的延时 PauseNow** 真暂停（Resume/Open/Stop/Seek 使旧计时失效）、seek 重开源保持增益不凹陷；**切歌不做旧曲淡出**——那需延迟换源、会把服务锁住整个淡出时长。淡出仅作用于 pause/resume 与新源淡入；与 master volume、EQ 无关。）
+
+（M4A/AIFF 格式已支持：symphonia features 增 `isomp4`+`aac`+`alac`（M4A=MP4 容器 + AAC/ALAC）与 `aiff`（PCM）；`domain/scan.rs::SUPPORTED_EXTENSIONS` 相应加 `m4a`/`aif`/`aiff`（**刻意不含** `.aac`——symphonia 0.5 的 `aac` feature 无 ADTS 读取器；不含 `.mp4`——视频容器会扫进影库；APE/WavPack/DSD/Opus 上游无解码器），`api/mock.ts` 的 SUPPORTED_EXTENSIONS 必须镜像；lofty 解析失败的文件仍按文件名降级入库不丢弃。）

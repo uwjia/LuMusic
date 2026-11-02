@@ -324,6 +324,25 @@ describe('mock import seam', () => {
     );
   });
 
+  // Mirrors the backend format gate: M4A/AIFF joined the set, while raw
+  // ADTS .aac and the video .mp4 container stay out.
+  it('imports m4a and aiff, skips aac (ADTS) and mp4 (video)', async () => {
+    const summary = await mockApi.libraryImport([
+      'C:/drop/iphone rip.m4a',
+      'C:/drop/vinyl rip.aiff',
+      'C:/drop/lossless.ape',
+      'C:/drop/concert.mp4',
+    ]);
+    expect(summary).toMatchObject({ imported: 2, skipped: 2 });
+    expect(summary.warnings.some((w) => w.includes('lossless.ape'))).toBe(true);
+    expect(summary.warnings.some((w) => w.includes('concert.mp4'))).toBe(true);
+    expect(await mockApi.getTracks()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'C:/drop/iphone rip.m4a', title: 'iphone rip' }),
+      ]),
+    );
+  });
+
   it('never fires drag events (a browser page sees no OS drops)', () => {
     const seen: string[] = [];
     const unsubscribe = mockApi.onDragDrop((event) => seen.push(event.type));

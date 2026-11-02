@@ -193,5 +193,5 @@ export const zhCN: Record<MessageKey, string> = {
   'settings.closeToTray': '关闭窗口时最小化到托盘',
   'settings.closeToTrayHint': '关闭窗口后应用将在后台继续播放；可通过托盘图标恢复窗口，或选择退出。',
   'settings.about': '关于',
-  'settings.aboutText': '支持的格式：MP3、FLAC、WAV、OGG。设置与音乐库缓存保存在应用数据目录中。',
+  'settings.aboutText': '支持的格式：MP3、FLAC、WAV、OGG、M4A（AAC/ALAC）、AIFF。设置与音乐库缓存保存在应用数据目录中。',
 };

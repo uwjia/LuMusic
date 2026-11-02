@@ -31,6 +31,15 @@ symphonia = { version = "0.5", default-features = false, features = [
     "pcm",
     "ogg",
     "vorbis",
+    # M4A: the MP4 container plus its two usual codecs (AAC-LC and Apple
+    # Lossless). Raw ADTS `.aac` is NOT covered — symphonia 0.5 ships no
+    # ADTS reader behind the `aac` feature, so the extension stays out of
+    # the scan list.
+    "isomp4",
+    "aac",
+    "alac",
+    # AIFF (PCM in the RIFF-family container; the `pcm` codec decodes it).
+    "aiff",
 ] }
 rand = "0.8"
 thiserror = "2"
