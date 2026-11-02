@@ -188,6 +188,25 @@ describe('mock settings + tray seam', () => {
   });
 });
 
+describe('mock reveal seam', () => {
+  it('maps auto playlists to folders and rejects manual or unknown ids', async () => {
+    await mockApi.playlistRevealFolder('auto:all');
+    await mockApi.playlistRevealFolder('auto:dir:Nova Fields');
+    // The singleton accumulates across tests: compare the newest calls.
+    expect(mockApi.revealed.slice(-2)).toEqual([
+      'C:/mock-music',
+      'C:/mock-music/Nova Fields',
+    ]);
+
+    await mockApi.playlistCreate('Reveal Mix');
+    const manual = (await mockApi.playlistList()).find((p) => p.name === 'Reveal Mix')!;
+    await expect(mockApi.playlistRevealFolder(manual.id)).rejects.toThrow('no folder to reveal');
+    await expect(mockApi.playlistRevealFolder('auto:dir:Missing')).rejects.toThrow(
+      'playlist not found',
+    );
+  });
+});
+
 describe('mock lyrics seam', () => {
   it('serves parsed lyrics for the track with a sibling lrc, null otherwise', async () => {
     const lyrics = await mockApi.lyricsGet('t1');

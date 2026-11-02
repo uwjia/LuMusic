@@ -134,6 +134,7 @@ export const en = {
   'playlist.actions': 'Playlist actions',
   'playlist.rename': 'Rename',
   'playlist.duplicate': 'Duplicate',
+  'playlist.openInExplorer': 'Open in Explorer',
   'playlist.delete': 'Delete playlist',
   'playlist.empty': 'This playlist is empty',
   'playlist.emptyHint': 'Add tracks from the library using the ＋ button on each row.',

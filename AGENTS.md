@@ -58,6 +58,7 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 - rodio 输出非 `Send`：音频引擎独占线程，经 channel proxy 暴露（`infra/audio/engine.rs`）。
 - 扫描重阶段（遍历 + 读标签）不持服务锁，仅合并步骤短暂加锁，**扫描不阻塞播放**。
 - 自动播放列表名（`All Tracks` / `Default`）由 `domain/scan.rs` 常量生成并持久化（同名覆盖语义），**后端始终存 canonical 英文名**。前端经 `@/lib/playlistDisplay` 按稳定 ID（`auto:all` / `auto:root`）做**显示层翻译**；不得把本地化名写回后端（重命名编辑器预填 canonical 名）。
+- 侧边栏歌单右键菜单的「在资源管理器中打开」仅对 ID 可映射文件夹的歌单展示（`isFolderBackedPlaylist`），后端经 `domain::scan::auto_playlist_folder` **按 id 重新推导并校验路径不逃逸扫描根**（拼接名必须是单一 normal 分量），经 `infra/shell.rs` 的 `FolderRevealer`（explorer/open/xdg-open，spawn 后即分离）打开；手动歌单（含被采纳后保留 pl-\* id 的）无映射。
 
 ## 测试规范
 
@@ -75,7 +76,7 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 
 - 环境 jsdom；`vitest.setup.ts` 已桩掉 `ResizeObserver` 并给 `.track-body` 假尺寸——虚拟化表格依赖它，勿删。
 - 跨 store 的组件测试（如 Sidebar）需同时 reset 相关 store 与 mock 的 `api`。
-- 现有规模：**233 前端 + 184 后端**；新增行为时保持各层均有覆盖，而非只补一层。
+- 现有规模：**260 前端 + 192 后端**；新增行为时保持各层均有覆盖，而非只补一层。
 
 ## 工程约束
 

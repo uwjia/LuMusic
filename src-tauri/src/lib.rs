@@ -60,6 +60,7 @@ pub fn run() {
             app::commands::playlist_remove_track,
             app::commands::playlist_move_track,
             app::commands::playlist_get_tracks,
+            app::commands::playlist_reveal_folder,
             app::commands::settings_get,
             app::commands::settings_set,
             app::commands::tray_set_labels,

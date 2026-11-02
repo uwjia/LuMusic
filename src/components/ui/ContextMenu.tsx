@@ -15,11 +15,19 @@ export interface ContextMenuItem {
   onSelect: () => void;
 }
 
+/** Visual gap isolating entries (e.g. before a destructive action);
+ *  not focusable, not clickable. */
+export interface ContextMenuSeparator {
+  separator: true;
+}
+
+export type ContextMenuEntry = ContextMenuItem | ContextMenuSeparator;
+
 interface ContextMenuProps {
   x: number;
   y: number;
   ariaLabel: string;
-  items: ContextMenuItem[];
+  items: ContextMenuEntry[];
   onClose: () => void;
 }
 
@@ -57,6 +65,9 @@ export function ContextMenu({ x, y, ariaLabel, items, onClose }: ContextMenuProp
     };
   }, [onClose]);
 
+  // Separators are not focusable: keyboard entry lands on the first item.
+  const firstItem = items.find((e): e is ContextMenuItem => !('separator' in e));
+
   return (
     <div
       ref={menuRef}
@@ -65,21 +76,25 @@ export function ContextMenu({ x, y, ariaLabel, items, onClose }: ContextMenuProp
       aria-label={ariaLabel}
       style={{ left, top }}
     >
-      {items.map((item, index) => (
-        <button
-          key={item.key}
-          type="button"
-          ref={index === 0 ? firstItemRef : undefined}
-          role="menuitem"
-          className={`context-menu-item ${item.danger ? 'danger' : ''}`}
-          onClick={() => {
-            item.onSelect();
-            onClose();
-          }}
-        >
-          {item.label}
-        </button>
-      ))}
+      {items.map((entry, index) =>
+        'separator' in entry ? (
+          <div key={`separator-${index}`} className="context-menu-separator" role="separator" />
+        ) : (
+          <button
+            key={entry.key}
+            type="button"
+            ref={entry === firstItem ? firstItemRef : undefined}
+            role="menuitem"
+            className={`context-menu-item ${entry.danger ? 'danger' : ''}`}
+            onClick={() => {
+              entry.onSelect();
+              onClose();
+            }}
+          >
+            {entry.label}
+          </button>
+        ),
+      )}
     </div>
   );
 }

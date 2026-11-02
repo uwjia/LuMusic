@@ -5,13 +5,13 @@
 
 import { useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { ContextMenu, type ContextMenuEntry } from '@/components/ui/ContextMenu';
 import { MusicIcon, SettingsIcon } from '@/features/settings/SettingsIcons';
 import { PLAYING_GLYPH, playlistRowIcon } from '@/features/playlists/PlaylistIcons';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useTranslation } from '@/i18n';
-import { displayPlaylistName } from '@/lib/playlistDisplay';
+import { displayPlaylistName, isFolderBackedPlaylist } from '@/lib/playlistDisplay';
 import type { Playlist } from '@/types/track';
 
 interface SidebarProps {
@@ -22,7 +22,8 @@ interface SidebarProps {
 export function Sidebar({ view, onNavigate }: SidebarProps) {
   const playlists = usePlaylistStore((s) => s.playlists);
   const error = usePlaylistStore((s) => s.error);
-  const { create, select, rename, duplicate, remove } = usePlaylistStore.getState();
+  const { create, select, rename, duplicate, remove, revealFolder } =
+    usePlaylistStore.getState();
   // Precise playing indicator: only the playlist the queue was loaded
   // from lights up. "Contains the current track" would permanently swap
   // All Tracks' dedicated icon for the speaker (it contains everything)
@@ -66,30 +67,48 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
   };
 
   const menuPlaylist = menu ? playlists.find((p) => p.id === menu.id) : undefined;
-  const menuItems = (playlist: NonNullable<typeof menuPlaylist>): ContextMenuItem[] => [
-    {
-      key: 'rename',
-      label: t('playlist.rename'),
-      onSelect: () => {
-        // Seed the editor with the canonical stored name, never the
-        // localized display name: saving the latter would persist a
-        // translated name and break the rescan overwrite semantics.
-        setDraftName(playlist.name);
-        setRenamingId(playlist.id);
+  const menuEntries = (playlist: NonNullable<typeof menuPlaylist>): ContextMenuEntry[] => {
+    const entries: ContextMenuEntry[] = [
+      {
+        key: 'rename',
+        label: t('playlist.rename'),
+        onSelect: () => {
+          // Seed the editor with the canonical stored name, never the
+          // localized display name: saving the latter would persist a
+          // translated name and break the rescan overwrite semantics.
+          setDraftName(playlist.name);
+          setRenamingId(playlist.id);
+        },
       },
-    },
-    {
-      key: 'duplicate',
-      label: t('playlist.duplicate'),
-      onSelect: () => void duplicate(playlist.id),
-    },
-    {
-      key: 'delete',
-      label: t('playlist.delete'),
-      danger: true,
-      onSelect: () => setConfirmingDelete(playlist),
-    },
-  ];
+      {
+        key: 'duplicate',
+        label: t('playlist.duplicate'),
+        onSelect: () => void duplicate(playlist.id),
+      },
+    ];
+    // The backend re-derives the folder from the id and re-validates it —
+    // this offer is a convenience filter, never a trusted input.
+    if (isFolderBackedPlaylist(playlist.id)) {
+      entries.push({
+        key: 'reveal',
+        label: t('playlist.openInExplorer'),
+        onSelect: () => void revealFolder(playlist.id),
+      });
+    }
+    return [
+      ...entries,
+      // Isolate the destructive action from the rest of the menu.
+      { separator: true },
+      {
+        key: 'delete',
+        label: t('playlist.delete'),
+        danger: true,
+        // Deletion is unrecoverable: the menu only stages the request,
+        // the confirm dialog performs it (see confirmDelete).
+        onSelect: () => setConfirmingDelete(playlist),
+      },
+    ];
+  };
 
   const confirmDelete = async () => {
     const target = confirmingDelete;
@@ -217,7 +236,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
           x={menu.x}
           y={menu.y}
           ariaLabel={t('playlist.actions')}
-          items={menuItems(menuPlaylist)}
+          items={menuEntries(menuPlaylist)}
           onClose={() => setMenu(null)}
         />
       ) : null}

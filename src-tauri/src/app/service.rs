@@ -4,7 +4,7 @@
 //! transitions, auto-advance, persistence side effects) is unit-tested with
 //! mocks instead of a real audio device.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,7 @@ use crate::infra::fs_scan::LibraryScanner;
 use crate::infra::lyrics::LyricSource;
 use crate::infra::metadata::MetadataReader;
 use crate::infra::persistence::{Persistence, PersistenceError};
+use crate::infra::shell::FolderRevealer;
 
 /// How often the live playback position is flushed to disk while playing.
 /// Transitions (track change, seek, pause, quit) always persist immediately;
@@ -40,6 +41,14 @@ pub enum PlayerError {
     TrackNotFound(TrackId),
     #[error("queue is empty")]
     EmptyQueue,
+    #[error("no music folder has been scanned yet")]
+    NoMusicFolder,
+    #[error("playlist '{0}' has no folder on disk")]
+    NotAFolderPlaylist(String),
+    #[error("folder '{0}' does not exist")]
+    FolderNotFound(String),
+    #[error("failed to open the file manager: {0}")]
+    Reveal(String),
     #[error("storage error: {0}")]
     Storage(#[from] PersistenceError),
 }
@@ -64,6 +73,7 @@ pub struct PlayerService {
     metadata: Arc<dyn MetadataReader>,
     lyric_source: Arc<dyn LyricSource>,
     persistence: Arc<dyn Persistence>,
+    revealer: Arc<dyn FolderRevealer>,
 
     library: LibraryIndex,
     playlists: PlaylistCollection,
@@ -89,6 +99,7 @@ impl PlayerService {
         metadata: Arc<dyn MetadataReader>,
         lyric_source: Arc<dyn LyricSource>,
         persistence: Arc<dyn Persistence>,
+        revealer: Arc<dyn FolderRevealer>,
     ) -> Result<Self, PlayerError> {
         let library = persistence.load_library()?.unwrap_or_default();
         let playlists = persistence.load_playlists()?;
@@ -108,6 +119,7 @@ impl PlayerService {
             metadata,
             lyric_source,
             persistence,
+            revealer,
             library,
             playlists,
             settings,
@@ -562,6 +574,31 @@ impl PlayerService {
         })
     }
 
+    /// Reveals the folder an auto playlist maps to in the OS file manager.
+    ///
+    /// The path is re-derived from the playlist id against the persisted
+    /// scan root — the UI's offer of the action is a convenience, never a
+    /// trusted input. Manual playlists (and adopted ones, whose ids stayed
+    /// manual) have no folder mapping and fail with `NotAFolderPlaylist`.
+    pub fn reveal_playlist_folder(&self, id: &str) -> Result<(), PlayerError> {
+        if self.playlists.get(id).is_none() {
+            return Err(PlayerError::Playlist(PlaylistError::NotFound(id.to_string())));
+        }
+        let root = self
+            .settings
+            .last_folder
+            .as_deref()
+            .ok_or(PlayerError::NoMusicFolder)?;
+        let folder = crate::domain::scan::auto_playlist_folder(id, &PathBuf::from(root))
+            .ok_or_else(|| PlayerError::NotAFolderPlaylist(id.to_string()))?;
+        if !folder.is_dir() {
+            return Err(PlayerError::FolderNotFound(folder.display().to_string()));
+        }
+        self.revealer
+            .reveal(&folder)
+            .map_err(|err| PlayerError::Reveal(err.to_string()))
+    }
+
     fn persist_playlists(&mut self) -> Result<(), PlayerError> {
         self.persistence.save_playlists(&self.playlists)?;
         Ok(())
@@ -647,6 +684,24 @@ mod tests {
                 path: audio_path.with_extension("lrc"),
                 text,
             })
+        }
+    }
+
+    /// Records reveal calls (optionally failing) — no real file manager is
+    /// ever spawned from unit tests.
+    #[derive(Default)]
+    struct MockRevealer {
+        fail: bool,
+        calls: Mutex<Vec<PathBuf>>,
+    }
+
+    impl FolderRevealer for MockRevealer {
+        fn reveal(&self, path: &Path) -> std::io::Result<()> {
+            if self.fail {
+                return Err(std::io::Error::other("spawn denied"));
+            }
+            self.calls.lock().unwrap().push(path.to_path_buf());
+            Ok(())
         }
     }
 
@@ -781,6 +836,7 @@ mod tests {
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap();
         service.scan_library(Path::new("C:/lib")).unwrap();
@@ -804,6 +860,7 @@ mod tests {
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir)),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap()
     }
@@ -852,6 +909,7 @@ mod tests {
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap();
         assert_eq!(reloaded.library_len(), 2);
@@ -949,6 +1007,7 @@ mod tests {
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap();
         service.scan_library(Path::new("C:/x")).unwrap();
@@ -1069,6 +1128,7 @@ mod tests {
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir.path())),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap();
         // Manual playlist + auto playlists from the earlier scan.
@@ -1120,6 +1180,121 @@ mod tests {
         );
     }
 
+    // ---------- reveal in file manager ----------
+
+    /// Service scanned from a *real* temp root containing a "Rock"
+    /// subfolder, so folder existence checks pass without faking the fs.
+    fn service_with_real_root(
+        revealer: Arc<MockRevealer>,
+    ) -> (PlayerService, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("Rock")).unwrap();
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let mut service = PlayerService::new(
+            Box::new(MockEngine {
+                state: engine_state,
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![dir.path().join("Rock").join("a.mp3")]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
+            Arc::new(JsonPersistence::new(dir.path())),
+            revealer,
+        )
+        .unwrap();
+        service.scan_library(dir.path()).unwrap();
+        (service, dir)
+    }
+
+    #[test]
+    fn reveal_maps_auto_playlists_to_folders_under_the_scan_root() {
+        let revealer = Arc::new(MockRevealer::default());
+        let (service, dir) = service_with_real_root(revealer.clone());
+        service.reveal_playlist_folder("auto:dir:Rock").unwrap();
+        service.reveal_playlist_folder("auto:all").unwrap();
+        assert_eq!(
+            *revealer.calls.lock().unwrap(),
+            vec![dir.path().join("Rock"), dir.path().to_path_buf()]
+        );
+    }
+
+    #[test]
+    fn reveal_rejects_manual_unknown_and_vanished_folders() {
+        let revealer = Arc::new(MockRevealer::default());
+        let (mut service, dir) = service_with_real_root(revealer.clone());
+        let manual = service.create_playlist("Chill").unwrap();
+        assert!(matches!(
+            service.reveal_playlist_folder(&manual.id),
+            Err(PlayerError::NotAFolderPlaylist(_))
+        ));
+        assert!(matches!(
+            service.reveal_playlist_folder("ghost"),
+            Err(PlayerError::Playlist(PlaylistError::NotFound(_)))
+        ));
+        // The folder existed at scan time but was deleted on disk since.
+        std::fs::remove_dir(dir.path().join("Rock")).unwrap();
+        assert!(matches!(
+            service.reveal_playlist_folder("auto:dir:Rock"),
+            Err(PlayerError::FolderNotFound(_))
+        ));
+        assert!(revealer.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reveal_without_a_scanned_music_folder_is_reported() {
+        // Playlists persisted from an earlier session but no scan root:
+        // hand-crafted through the persistence seam, like a fresh install
+        // that restored playlists but never scanned.
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = JsonPersistence::new(dir.path());
+        let mut playlists = PlaylistCollection::new();
+        playlists.sync_auto(
+            &[crate::domain::playlist::AutoPlaylistSpec {
+                id: "auto:all".into(),
+                name: "All Tracks".into(),
+                items: Vec::new(),
+            }],
+            1,
+        );
+        store.save_playlists(&playlists).unwrap();
+        let revealer = Arc::new(MockRevealer::default());
+        let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
+        let service = PlayerService::new(
+            Box::new(MockEngine {
+                state: engine_state,
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
+            Arc::new(store),
+            revealer.clone(),
+        )
+        .unwrap();
+        assert!(matches!(
+            service.reveal_playlist_folder("auto:all"),
+            Err(PlayerError::NoMusicFolder)
+        ));
+        assert!(revealer.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reveal_maps_opener_failures_to_reveal_errors() {
+        let revealer = Arc::new(MockRevealer {
+            fail: true,
+            calls: Mutex::new(vec![]),
+        });
+        let (service, _dir) = service_with_real_root(revealer);
+        assert!(matches!(
+            service.reveal_playlist_folder("auto:all"),
+            Err(PlayerError::Reveal(_))
+        ));
+    }
+
     // ---------- shuffle wiring ----------
 
     #[test]
@@ -1147,6 +1322,7 @@ mod tests {
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
             Arc::new(JsonPersistence::new(dir)),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap();
         (service, engine_state)
@@ -1330,6 +1506,7 @@ mod tests {
             Arc::new(MockMetadata),
             lyric_source,
             Arc::new(JsonPersistence::new(dir.path())),
+            Arc::new(MockRevealer::default()),
         )
         .unwrap();
         service.scan_library(Path::new("C:/lib")).unwrap();

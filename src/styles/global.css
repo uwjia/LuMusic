@@ -532,6 +532,12 @@ button {
   color: var(--danger);
 }
 
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--bg-3);
+}
+
 /* ---------- confirm dialog ---------- */
 
 /* Fixed + above the context menu layer so a staged confirmation always

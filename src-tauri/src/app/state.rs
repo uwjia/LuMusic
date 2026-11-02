@@ -9,6 +9,7 @@ use crate::infra::fs_scan::WalkdirScanner;
 use crate::infra::lyrics::FsLyricSource;
 use crate::infra::metadata::LoftyMetadataReader;
 use crate::infra::persistence::JsonPersistence;
+use crate::infra::shell::SystemRevealer;
 
 /// Shared service handle managed by Tauri and the poller thread.
 pub type SharedService = Arc<Mutex<PlayerService>>;
@@ -29,6 +30,7 @@ pub fn build(data_dir: &Path) -> Result<SharedService, PlayerError> {
         Arc::new(LoftyMetadataReader),
         Arc::new(FsLyricSource),
         Arc::new(JsonPersistence::new(data_dir)),
+        Arc::new(SystemRevealer),
     )?;
     Ok(Arc::new(Mutex::new(service)))
 }

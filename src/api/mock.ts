@@ -441,6 +441,37 @@ class MockApi implements PlayerApi {
       .filter((t): t is Track => Boolean(t));
   }
 
+  // No real file manager exists in a browser; the mapping and the rejections
+  // mirror the backend so components/tests exercise the same contract.
+  // Revealed folders are recorded for observability (tests, dev:mock).
+  private revealedFolders: string[] = [];
+
+  get revealed(): readonly string[] {
+    return this.revealedFolders;
+  }
+
+  async playlistRevealFolder(id: string) {
+    if (!this.playlists.some((p) => p.id === id)) {
+      throw new Error(`playlist not found: ${id}`);
+    }
+    const name = id.startsWith('auto:dir:') ? id.slice('auto:dir:'.length) : null;
+    // Mirrors domain::scan::auto_playlist_folder: fixed autos -> the scan
+    // root; folder autos -> root/<name>; escapes and manual ids -> error.
+    const folder =
+      id === 'auto:all' || id === 'auto:root'
+        ? TRACKS_ROOT
+        : name &&
+            name !== '' &&
+            name !== '.' &&
+            name !== '..' &&
+            !name.includes('/') &&
+            !name.includes('\\')
+          ? `${TRACKS_ROOT}/${name}`
+          : null;
+    if (!folder) throw new Error(`playlist has no folder to reveal: ${id}`);
+    this.revealedFolders.push(folder);
+  }
+
   async settingsGet(): Promise<Settings> {
     return {
       volume: this.volume,

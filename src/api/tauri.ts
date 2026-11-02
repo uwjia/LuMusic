@@ -68,6 +68,7 @@ export const tauriApi: PlayerApi = {
   playlistRemoveTrack: (id, trackId) => invoke('playlist_remove_track', { id, trackId }),
   playlistMoveTrack: (id, from, to) => invoke('playlist_move_track', { id, from, to }),
   playlistGetTracks: (id) => invoke('playlist_get_tracks', { id }),
+  playlistRevealFolder: (id) => invoke('playlist_reveal_folder', { id }),
 
   settingsGet: () => invoke('settings_get'),
   // Missing fields are sent as explicit nulls so serde maps them to None.

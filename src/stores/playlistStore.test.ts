@@ -12,6 +12,7 @@ vi.mock('@/api', () => ({
     playlistRename: vi.fn(),
     playlistDelete: vi.fn(),
     playlistAddTrack: vi.fn(),
+    playlistRevealFolder: vi.fn(),
     playlistRemoveTrack: vi.fn(),
     playlistMoveTrack: vi.fn(),
   },
@@ -186,5 +187,23 @@ describe('playlistStore', () => {
     const ok = await usePlaylistStore.getState().duplicate('ghost');
     expect(ok).toBe(false);
     expect(usePlaylistStore.getState().error).toBe('playlist not found');
+  });
+
+  it('revealFolder delegates to the api and clears stale errors', async () => {
+    vi.mocked(api.playlistRevealFolder).mockResolvedValue(undefined);
+    usePlaylistStore.setState({ error: 'stale' });
+    const ok = await usePlaylistStore.getState().revealFolder('auto:dir:Rock');
+    expect(ok).toBe(true);
+    expect(api.playlistRevealFolder).toHaveBeenCalledWith('auto:dir:Rock');
+    expect(usePlaylistStore.getState().error).toBeNull();
+  });
+
+  it('revealFolder surfaces backend failures for the sidebar alert', async () => {
+    vi.mocked(api.playlistRevealFolder).mockRejectedValue(
+      new Error("folder 'C:/m/Rock' does not exist"),
+    );
+    const ok = await usePlaylistStore.getState().revealFolder('auto:dir:Rock');
+    expect(ok).toBe(false);
+    expect(usePlaylistStore.getState().error).toContain('does not exist');
   });
 });

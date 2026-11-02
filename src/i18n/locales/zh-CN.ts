@@ -133,6 +133,7 @@ export const zhCN: Record<MessageKey, string> = {
   'playlist.actions': '歌单操作',
   'playlist.rename': '重命名',
   'playlist.duplicate': '创建副本',
+  'playlist.openInExplorer': '在资源管理器中打开',
   'playlist.delete': '删除歌单',
   'playlist.empty': '该歌单为空',
   'playlist.emptyHint': '在音乐库中点击每行的 ＋ 按钮添加曲目。',

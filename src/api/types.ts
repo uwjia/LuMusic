@@ -52,6 +52,12 @@ export interface PlayerApi {
   playlistRemoveTrack(id: string, trackId: TrackId): Promise<void>;
   playlistMoveTrack(id: string, from: number, to: number): Promise<void>;
   playlistGetTracks(id: string): Promise<Track[]>;
+  /**
+   * Reveals the playlist's folder in the OS file manager. Only auto
+   * playlists map to a folder; the backend re-derives and re-validates
+   * the path (manual ids are rejected).
+   */
+  playlistRevealFolder(id: string): Promise<void>;
 
   // settings
   settingsGet(): Promise<Settings>;

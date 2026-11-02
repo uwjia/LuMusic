@@ -18,6 +18,8 @@ interface PlaylistStoreState {
   rename: (id: string, newName: string) => Promise<boolean>;
   remove: (id: string) => Promise<boolean>;
   duplicate: (id: string) => Promise<boolean>;
+  /** Reveals the playlist's folder in the OS file manager (auto playlists). */
+  revealFolder: (id: string) => Promise<boolean>;
   addTrack: (trackId: string) => Promise<boolean>;
   removeTrack: (trackId: string) => Promise<boolean>;
   moveTrack: (from: number, to: number) => Promise<boolean>;
@@ -118,6 +120,13 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
       // Keep the source selected: the page stays on the playlist the user
       // is looking at; the copy shows up in the sidebar list.
       await get().load();
+    }),
+
+  // No list refresh needed: opening a file manager window changes nothing
+  // in the store — errors land in `error` for the sidebar alert.
+  revealFolder: (id) =>
+    guard(set, async () => {
+      await api.playlistRevealFolder(id);
     }),
 
   // Track mutations rely on load() refreshing both the playlist list and

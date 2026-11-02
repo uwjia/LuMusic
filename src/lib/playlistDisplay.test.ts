@@ -1,7 +1,7 @@
 // Unit tests for the auto-playlist display-name mapping.
 import { describe, expect, it } from 'vitest';
 import { t, translate } from '@/i18n';
-import { displayPlaylistName } from '@/lib/playlistDisplay';
+import { displayPlaylistName, isFolderBackedPlaylist } from '@/lib/playlistDisplay';
 import type { Playlist } from '@/types/track';
 
 const pl = (id: string, name: string): Pick<Playlist, 'id' | 'name'> => ({ id, name });
@@ -33,5 +33,18 @@ describe('displayPlaylistName', () => {
     // A manual playlist with the same *name* has a different id and must
     // keep its stored name - only the canonical ids are display-mapped.
     expect(displayPlaylistName(pl('pl-9', 'Default'), translate.bind(null, 'zh-CN'))).toBe('Default');
+  });
+});
+
+describe('isFolderBackedPlaylist', () => {
+  it('is true only for the ids that map to a folder under the scan root', () => {
+    expect(isFolderBackedPlaylist('auto:all')).toBe(true);
+    expect(isFolderBackedPlaylist('auto:root')).toBe(true);
+    expect(isFolderBackedPlaylist('auto:dir:周杰伦')).toBe(true);
+    // Manual ids — including a manual playlist adopted by a scan, which
+    // keeps its pl-* id — encode no folder mapping.
+    expect(isFolderBackedPlaylist('pl-1')).toBe(false);
+    expect(isFolderBackedPlaylist('auto:')).toBe(false);
+    expect(isFolderBackedPlaylist('auto:xyz')).toBe(false);
   });
 });

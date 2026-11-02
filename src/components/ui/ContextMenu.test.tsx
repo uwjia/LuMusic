@@ -2,7 +2,11 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import {
+  ContextMenu,
+  type ContextMenuEntry,
+  type ContextMenuItem,
+} from '@/components/ui/ContextMenu';
 
 function makeItems() {
   return [
@@ -51,5 +55,20 @@ describe('ContextMenu', () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.pointerDown(document.body);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders separators between entries and keeps focus on the first item', () => {
+    const items = makeItems();
+    const entries: ContextMenuEntry[] = [items[0], { separator: true }, items[1]];
+    render(<ContextMenu x={0} y={0} ariaLabel="Actions" items={entries} onClose={vi.fn()} />);
+    // The separator is a plain non-interactive divider, not a menuitem;
+    // keyboard focus still lands on the first real entry above it.
+    const separator = screen.getByRole('separator');
+    expect(separator.tagName).toBe('DIV');
+    expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+    // Entries below the separator stay clickable.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
+    expect(items[1].onSelect).toHaveBeenCalledTimes(1);
   });
 });

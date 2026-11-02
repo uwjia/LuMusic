@@ -341,6 +341,18 @@ pub fn playlist_get_tracks(
         .ok_or_else(|| "playlist not found".to_string())
 }
 
+/// Reveals the folder an auto playlist maps to in the OS file manager.
+/// The backend re-derives the path from the playlist id (the UI's offer of
+/// the action is a convenience, never a trusted input).
+#[tauri::command]
+pub fn playlist_reveal_folder(
+    state: State<'_, SharedService>,
+    id: String,
+) -> Result<(), String> {
+    let service = state.lock().map_err(|_| "service poisoned")?;
+    map(service.reveal_playlist_folder(&id))
+}
+
 // ----- settings -----
 
 #[tauri::command]

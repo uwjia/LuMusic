@@ -106,9 +106,71 @@ pub fn auto_playlist_plan(root: &Path, paths: &[PathBuf]) -> Vec<AutoPlaylistSpe
     specs
 }
 
+/// Resolves the on-disk folder an auto playlist id maps to.
+///
+/// - `auto:all` / `auto:root` -> the scan root itself;
+/// - `auto:dir:<name>` -> the first-level folder of that name;
+/// - anything else (manual playlists, crafted ids) -> `None`.
+///
+/// The joined path must stay under `root`: the folder name has to be a
+/// single normal path component and the root absolute, so ids like
+/// `auto:dir:../x` or `auto:dir:a/b` resolve to nothing instead of
+/// escaping the music folder.
+pub fn auto_playlist_folder(id: &str, root: &Path) -> Option<PathBuf> {
+    if !root.is_absolute() {
+        return None;
+    }
+    if id == "auto:all" || id == "auto:root" {
+        return Some(root.to_path_buf());
+    }
+    let name = id.strip_prefix("auto:dir:")?;
+    let mut components = Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(component), None) if matches!(component, std::path::Component::Normal(_)) => {
+            Some(root.join(name))
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_playlist_folder_maps_ids_to_paths_under_the_root() {
+        let root = Path::new("C:/music");
+        assert_eq!(auto_playlist_folder("auto:all", root).as_deref(), Some(root));
+        assert_eq!(auto_playlist_folder("auto:root", root).as_deref(), Some(root));
+        assert_eq!(
+            auto_playlist_folder("auto:dir:Rock", root).as_deref(),
+            Some(Path::new("C:/music/Rock"))
+        );
+        // Folder names are user data: unicode must survive verbatim.
+        assert_eq!(
+            auto_playlist_folder("auto:dir:周杰伦", root).as_deref(),
+            Some(Path::new("C:/music/周杰伦"))
+        );
+    }
+
+    #[test]
+    fn auto_playlist_folder_rejects_escapes_and_manual_ids() {
+        let root = Path::new("C:/music");
+        for id in [
+            "auto:dir:..",
+            "auto:dir:../x",
+            "auto:dir:a/b",
+            "auto:dir:",
+            "auto:dir:C:/x",
+            "pl-1",
+            "auto:",
+            "auto:xyz",
+        ] {
+            assert!(auto_playlist_folder(id, root).is_none(), "{id} must not resolve");
+        }
+        // A relative scan root is meaningless on disk: refuse it too.
+        assert!(auto_playlist_folder("auto:all", Path::new("music")).is_none());
+    }
 
     #[test]
     fn is_audio_file_matches_supported_extensions_case_insensitively() {
