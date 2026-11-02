@@ -15,8 +15,10 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use ape_decoder::ApeDecoder;
 use rodio::Source;
@@ -54,14 +56,86 @@ pub trait ApeStream: Send {
     fn seek_block(&mut self, block: u64) -> Result<u32, String>;
 }
 
-/// Production [`ApeStream`] over an opened file. Owns a frame cursor
-/// because `ApeDecoder::seek` is a pure calculation (it locates, it does
-/// not reposition) and `frames()` mutably borrows the decoder for its
-/// whole lifetime — driving `decode_frame` by index keeps sequential
-/// decode and seek on one code path.
+/// Production [`ApeStream`] over an opened file.
+///
+/// **Decoding runs on its own thread, not the audio callback.** An APE
+/// frame holds up to ~73728 blocks (~1.7 s of audio) and the entropy
+/// decode of one frame costs tens of milliseconds — spent on the callback
+/// thread that is an instant underrun (audible as crackle and hiccups;
+/// symphonia formats decode in small packets and get away with it). The
+/// worker prefetches [`PREFETCH_FRAMES`] decoded frames into a bounded
+/// channel, so the audio thread only ever does a cheap `try`-style recv,
+/// and the bound throttles decoding to just-ahead-of-playback.
+///
+/// Seeks race the prefetch: the consumer bumps a generation counter, the
+/// worker tags every frame it decodes, and stale frames are dropped on
+/// arrival. `ApeDecoder::seek` is a pure calculation, so the consumer can
+/// also compute the intra-frame skip locally without touching the worker's
+/// decoder (see [`locate_block`]).
 pub struct ApeDecoderStream {
-    decoder: ApeDecoder<BufReader<File>>,
-    next_frame: u32,
+    /// Header snapshot: the info accessors must never touch the decoder
+    /// (the worker owns it exclusively).
+    info: StreamInfo,
+    cmd_tx: Sender<WorkerCmd>,
+    frames_rx: Receiver<DecodedFrame>,
+    /// Raised on every seek; frames carrying an older value are stale.
+    generation: u64,
+    /// Kept to name the thread in panic messages; detached on drop.
+    _worker: JoinHandle<()>,
+}
+
+/// Immutable header facts the stream answers from memory.
+struct StreamInfo {
+    sample_rate: u32,
+    channels: u16,
+    bytes_per_sample: u16,
+    total_blocks: u64,
+    total_frames: u32,
+    blocks_per_frame: u64,
+    big_endian: bool,
+    signed_8bit: bool,
+    floating_point: bool,
+}
+
+enum WorkerCmd {
+    /// Jump to the frame holding `block`; tag everything decoded
+    /// afterwards with `generation`.
+    Seek { block: u64, generation: u64 },
+    Stop,
+}
+
+struct DecodedFrame {
+    generation: u64,
+    pcm: Result<Vec<u8>, String>,
+}
+
+/// How many decoded frames may sit in the channel. Four frames cover
+/// several seconds of audio at the common frame size — ample cushion for
+/// decode-time spikes while capping buffered PCM to a few MB.
+const PREFETCH_FRAMES: usize = 4;
+
+/// Upper bound the audio thread ever blocks waiting for a frame. Reached
+/// only at track start / after a seek (one frame of decode latency) or
+/// when decoding is slower than realtime; then the track ends gracefully
+/// like a truncated file instead of hard-locking the callback.
+const FRAME_WAIT: Duration = Duration::from_secs(2);
+
+/// Pure seek math mirroring `ApeDecoder::seek` (which is itself a pure
+/// calculation): clamps the block and splits it into a frame index plus
+/// the blocks to skip inside that frame.
+fn locate_block(
+    block: u64,
+    total_blocks: u64,
+    blocks_per_frame: u64,
+    total_frames: u32,
+) -> (u32, u32) {
+    if total_blocks == 0 || blocks_per_frame == 0 || total_frames == 0 {
+        return (0, 0);
+    }
+    let clamped = block.min(total_blocks - 1);
+    let frame = ((clamped / blocks_per_frame) as u32).min(total_frames - 1);
+    let frame_start = frame as u64 * blocks_per_frame;
+    (frame, (clamped - frame_start) as u32)
 }
 
 impl ApeDecoderStream {
@@ -71,60 +145,218 @@ impl ApeDecoderStream {
         let decoder = ApeDecoder::new(BufReader::new(file)).map_err(|err| {
             AudioError::Decode(path.display().to_string(), err.to_string())
         })?;
+        let ape_info = decoder.info().clone();
+        let info = StreamInfo {
+            sample_rate: ape_info.sample_rate,
+            channels: ape_info.channels,
+            bytes_per_sample: ape_info.bytes_per_sample,
+            total_blocks: ape_info.total_samples,
+            total_frames: decoder.total_frames(),
+            blocks_per_frame: ape_info.blocks_per_frame as u64,
+            big_endian: ape_info.is_big_endian,
+            signed_8bit: ape_info.is_signed_8bit,
+            floating_point: ape_info.is_floating_point,
+        };
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
+        let (frame_tx, frames_rx) =
+            std::sync::mpsc::sync_channel::<DecodedFrame>(PREFETCH_FRAMES);
+        let worker = std::thread::Builder::new()
+            .name("lumusic-ape-decode".into())
+            .spawn(move || decode_worker(decoder, cmd_rx, frame_tx))
+            .map_err(|_| AudioError::NoDevice)?;
         Ok(Self {
-            decoder,
-            next_frame: 0,
+            info,
+            cmd_tx,
+            frames_rx,
+            generation: 0,
+            _worker: worker,
         })
+    }
+}
+
+/// Prefetch loop owning the decoder. Between frames it drains commands;
+/// the bounded channel blocks here (never on the audio thread) once the
+/// prefetch buffer is full — that is the throttle.
+fn decode_worker(
+    mut decoder: ApeDecoder<BufReader<File>>,
+    cmd_rx: Receiver<WorkerCmd>,
+    frame_tx: SyncSender<DecodedFrame>,
+) {
+    let total_frames = decoder.total_frames();
+    let mut cursor: u32 = 0;
+    let mut generation: u64 = 0;
+    loop {
+        // Serve the newest seek, then (re)start prefetching from it.
+        match drain_commands(&cmd_rx, &mut cursor, &mut generation, &mut decoder, &frame_tx) {
+            Flow::Stop => return,
+            Flow::Continue => {}
+        }
+        if cursor >= total_frames {
+            // Everything decoded: idle until a seek or shutdown. The
+            // timeout only re-checks for a disconnected producer.
+            match cmd_rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(WorkerCmd::Seek { block, generation: gen }) => {
+                    match decoder.seek(block) {
+                        Ok(pos) => {
+                            cursor = pos.frame_index;
+                            generation = gen;
+                        }
+                        Err(err) => {
+                            let _ = frame_tx.send(DecodedFrame {
+                                generation: gen,
+                                pcm: Err(err.to_string()),
+                            });
+                            return;
+                        }
+                    }
+                }
+                Ok(WorkerCmd::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) => continue,
+            }
+        }
+        let index = cursor;
+        cursor += 1;
+        let started = Instant::now();
+        let pcm = decoder.decode_frame(index).map_err(|err| err.to_string());
+        if started.elapsed() > Duration::from_millis(250) {
+            // Slow-machine diagnostics: near-realtime decoding means the
+            // prefetch cushion shrinks and playback may stutter.
+            tracing::debug!(
+                "ape frame {index} took {:#?} to decode (near-realtime risk)",
+                started.elapsed()
+            );
+        }
+        match pcm {
+            Ok(bytes) => {
+                if frame_tx
+                    .send(DecodedFrame { generation, pcm: Ok(bytes) })
+                    .is_err()
+                {
+                    return; // consumer dropped: stream closed
+                }
+            }
+            Err(err) => {
+                // Decode failures are terminal (no resync point); report
+                // and stop prefetching.
+                let _ = frame_tx.send(DecodedFrame {
+                    generation,
+                    pcm: Err(err),
+                });
+                return;
+            }
+        }
+    }
+}
+
+enum Flow {
+    Stop,
+    Continue,
+}
+
+/// Applies every pending command; the last seek wins. A seek whose
+/// calculation fails (theoretically unreachable — `seek` is pure math)
+/// surfaces as a terminal error frame under the *new* generation so the
+/// consumer stops cleanly instead of waiting it out.
+fn drain_commands(
+    cmd_rx: &Receiver<WorkerCmd>,
+    cursor: &mut u32,
+    generation: &mut u64,
+    decoder: &mut ApeDecoder<BufReader<File>>,
+    frame_tx: &SyncSender<DecodedFrame>,
+) -> Flow {
+    loop {
+        match cmd_rx.try_recv() {
+            Ok(WorkerCmd::Seek { block, generation: gen }) => match decoder.seek(block) {
+                Ok(pos) => {
+                    *cursor = pos.frame_index;
+                    *generation = gen;
+                }
+                Err(err) => {
+                    let _ = frame_tx.send(DecodedFrame {
+                        generation: gen,
+                        pcm: Err(err.to_string()),
+                    });
+                    return Flow::Stop;
+                }
+            },
+            Ok(WorkerCmd::Stop) => return Flow::Stop,
+            Err(TryRecvError::Empty) => return Flow::Continue,
+            Err(TryRecvError::Disconnected) => return Flow::Stop,
+        }
     }
 }
 
 impl ApeStream for ApeDecoderStream {
     fn sample_rate(&self) -> u32 {
-        self.decoder.info().sample_rate
+        self.info.sample_rate
     }
 
     fn channels(&self) -> u16 {
-        self.decoder.info().channels
+        self.info.channels
     }
 
     fn bytes_per_sample(&self) -> u16 {
-        self.decoder.info().bytes_per_sample
+        self.info.bytes_per_sample
     }
 
     fn total_blocks(&self) -> u64 {
-        self.decoder.info().total_samples
+        self.info.total_blocks
     }
 
     fn is_big_endian(&self) -> bool {
-        self.decoder.info().is_big_endian
+        self.info.big_endian
     }
 
     fn is_signed_8bit(&self) -> bool {
-        self.decoder.info().is_signed_8bit
+        self.info.signed_8bit
     }
 
     fn is_floating_point(&self) -> bool {
-        self.decoder.info().is_floating_point
+        self.info.floating_point
     }
 
     fn next_frame_pcm(&mut self) -> Option<Result<Vec<u8>, String>> {
-        if self.next_frame >= self.decoder.total_frames() {
-            return None;
+        loop {
+            match self.frames_rx.recv_timeout(FRAME_WAIT) {
+                Ok(frame) if frame.generation == self.generation => return Some(frame.pcm),
+                // Stale pre-seek frame: the seek invalidated it, drop and
+                // keep draining. Draining is instant (frames are already
+                // decoded); at most the first new frame costs one decode.
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Timeout) => {
+                    tracing::warn!("ape decode stalled for {FRAME_WAIT:?}; ending track");
+                    return Some(Err("decode stalled".into()));
+                }
+                Err(RecvTimeoutError::Disconnected) => return None,
+            }
         }
-        let index = self.next_frame;
-        self.next_frame += 1;
-        Some(self.decoder.decode_frame(index).map_err(|err| err.to_string()))
     }
 
     fn seek_block(&mut self, block: u64) -> Result<u32, String> {
-        // `seek` clamps to the last sample itself; a decode error here
-        // means a broken header and surfaces like any other one.
-        let located = self
-            .decoder
-            .seek(block)
-            .map_err(|err| err.to_string())?;
-        self.next_frame = located.frame_index;
-        Ok(located.skip_samples)
+        self.generation += 1;
+        let (_frame, skip) = locate_block(
+            block,
+            self.info.total_blocks,
+            self.info.blocks_per_frame,
+            self.info.total_frames,
+        );
+        self.cmd_tx
+            .send(WorkerCmd::Seek {
+                block,
+                generation: self.generation,
+            })
+            .map_err(|_| "decoder worker is gone".to_string())?;
+        Ok(skip)
+    }
+}
+
+impl Drop for ApeDecoderStream {
+    fn drop(&mut self) {
+        // Idle workers see this; a worker blocked on a full frame channel
+        // is released by the field drops right after this body (dropping
+        // the receiver disconnects its send).
+        let _ = self.cmd_tx.send(WorkerCmd::Stop);
     }
 }
 
@@ -566,6 +798,40 @@ mod tests {
             Ok(_) => panic!("a missing file must not open"),
         };
         assert!(matches!(err, AudioError::OpenFile(_)));
+    }
+
+    /// The consumer-side seek math must mirror `ApeDecoder::seek` exactly:
+    /// the adapter skips `skip` blocks inside frame `frame`, so an
+    /// off-by-one here lands playback one block early/late.
+    #[test]
+    fn locate_block_splits_a_target_into_frame_and_skip() {
+        // 8 blocks of 4 per frame -> frames [0-3], [4-7].
+        let split = |block: u64| locate_block(block, 8, 4, 2);
+        assert_eq!(split(0), (0, 0));
+        assert_eq!(split(3), (0, 3));
+        assert_eq!(split(4), (1, 0)); // exact frame boundary
+        assert_eq!(split(6), (1, 2));
+        // Past the end clamps onto the last block.
+        assert_eq!(split(9), (1, 3));
+        assert_eq!(split(u64::MAX), (1, 3));
+    }
+
+    #[test]
+    fn locate_block_degenerates_to_the_start_on_empty_streams() {
+        assert_eq!(locate_block(10, 0, 4, 0), (0, 0));
+        assert_eq!(locate_block(10, 8, 0, 2), (0, 0));
+        assert_eq!(locate_block(10, 8, 4, 0), (0, 0));
+    }
+
+    #[test]
+    fn locate_block_never_passes_the_last_frame_index() {
+        // A header claiming fewer frames than the blocks imply
+        // (inconsistent file): the frame index clamps into range while the
+        // skip keeps the algebraic difference — exactly what the upstream
+        // decoder returns; the adapter additionally byte-clamps the skip
+        // inside the frame (pull_frame's min).
+        assert_eq!(locate_block(9, 10, 4, 2), (1, 5));
+        assert_eq!(locate_block(9, 100, 4, 3), (2, 1));
     }
 
     #[test]
