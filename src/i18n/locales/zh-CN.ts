@@ -4,6 +4,9 @@
 import type { MessageKey } from '@/i18n/locales/en';
 
 export const zhCN: Record<MessageKey, string> = {
+  // 通用界面
+  'common.cancel': '取消',
+
   // 侧边栏导航
   'nav.navigation': '导航',
   'nav.library': '音乐库',
@@ -136,6 +139,9 @@ export const zhCN: Record<MessageKey, string> = {
   'playlist.removeTrack': '从歌单移除 {title}',
   'playlist.copyName': '{name}（副本）',
   'playlist.copyNameN': '{name}（副本 {n}）',
+  'playlist.deleteConfirmTitle': '删除歌单？',
+  'playlist.deleteConfirmMessage': '确定删除“{name}”吗？仅移除歌单本身，曲目仍保留在音乐库中。',
+  'playlist.deleteConfirm': '删除',
 
   // 设置页面
   'settings.title': '设置',

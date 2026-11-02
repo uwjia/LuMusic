@@ -10,6 +10,7 @@
   --accent: #6366f1;
   --accent-2: #a855f7;
   --danger: #ef4444;
+  --overlay: rgba(15, 17, 23, 0.55);
   --radius: 8px;
   color-scheme: dark;
 }
@@ -529,6 +530,56 @@ button {
 
 .context-menu-item.danger {
   color: var(--danger);
+}
+
+/* ---------- confirm dialog ---------- */
+
+/* Fixed + above the context menu layer so a staged confirmation always
+   reads as the topmost surface. */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  background: var(--overlay);
+}
+
+.dialog {
+  width: min(380px, calc(100vw - 48px));
+  padding: 18px;
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.dialog-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.dialog-message {
+  margin: 0 0 16px;
+  color: var(--fg-1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.btn-danger-solid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--fg-0);
+}
+
+.btn-danger-solid:hover {
+  filter: brightness(1.1);
 }
 
 /* ---------- empty state ---------- */

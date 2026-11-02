@@ -4,6 +4,9 @@
 // the `Record<MessageKey, string>` type).
 
 export const en = {
+  // generic UI
+  'common.cancel': 'Cancel',
+
   // sidebar navigation
   'nav.navigation': 'Navigation',
   'nav.library': 'Library',
@@ -137,6 +140,10 @@ export const en = {
   'playlist.removeTrack': 'Remove {title} from playlist',
   'playlist.copyName': '{name} (copy)',
   'playlist.copyNameN': '{name} (copy) {n}',
+  'playlist.deleteConfirmTitle': 'Delete playlist?',
+  'playlist.deleteConfirmMessage':
+  'Delete "{name}"? Only the playlist is removed; its tracks stay in the library.',
+  'playlist.deleteConfirm': 'Delete',
 
   // settings page
   'settings.title': 'Settings',

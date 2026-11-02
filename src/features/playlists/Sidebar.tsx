@@ -4,11 +4,14 @@
 // right-click menu on the row; renaming swaps the row for an inline editor.
 
 import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { MusicIcon, SettingsIcon } from '@/features/settings/SettingsIcons';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useTranslation } from '@/i18n';
 import { displayPlaylistName } from '@/lib/playlistDisplay';
+import type { Playlist } from '@/types/track';
 
 interface SidebarProps {
   view: { kind: 'library' } | { kind: 'settings' } | { kind: 'playlist'; id: string };
@@ -28,6 +31,9 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
+  // Playlist awaiting delete confirmation; deletion is destructive and
+  // unrecoverable, so the context menu only stages it here.
+  const [confirmingDelete, setConfirmingDelete] = useState<Playlist | null>(null);
 
   const submit = async () => {
     // Trim here so the API contract stays "display-ready name".
@@ -75,9 +81,21 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
       key: 'delete',
       label: t('playlist.delete'),
       danger: true,
-      onSelect: () => void remove(playlist.id),
+      onSelect: () => setConfirmingDelete(playlist),
     },
   ];
+
+  const confirmDelete = async () => {
+    const target = confirmingDelete;
+    setConfirmingDelete(null);
+    if (!target) return;
+    const ok = await remove(target.id);
+    // Deleting the playlist that is currently open would leave a stale
+    // "not found" page behind — fall back to the library instead.
+    if (ok && view.kind === 'playlist' && view.id === target.id) {
+      onNavigate({ kind: 'library' });
+    }
+  };
 
   return (
     <nav className="sidebar" aria-label={t('nav.navigation')}>
@@ -86,7 +104,10 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
         className={`nav-item ${view.kind === 'library' ? 'is-active' : ''}`}
         onClick={() => onNavigate({ kind: 'library' })}
       >
-        🎵 {t('nav.library')}
+        {/* 1em keeps the glyph exactly text-sized; currentColor follows
+            the nav item's hover/active color states (an emoji cannot). */}
+        <MusicIcon size="1em" />
+        {t('nav.library')}
       </button>
 
       <div className="sidebar-section">
@@ -178,7 +199,8 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
         className={`nav-item ${view.kind === 'settings' ? 'is-active' : ''}`}
         onClick={() => onNavigate({ kind: 'settings' })}
       >
-        ⚙ {t('nav.settings')}
+        <SettingsIcon size="1em" />
+        {t('nav.settings')}
       </button>
 
       {menu && menuPlaylist ? (
@@ -188,6 +210,19 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
           ariaLabel={t('playlist.actions')}
           items={menuItems(menuPlaylist)}
           onClose={() => setMenu(null)}
+        />
+      ) : null}
+
+      {confirmingDelete ? (
+        <ConfirmDialog
+          title={t('playlist.deleteConfirmTitle')}
+          message={t('playlist.deleteConfirmMessage', {
+            name: displayPlaylistName(confirmingDelete, t),
+          })}
+          confirmLabel={t('playlist.deleteConfirm')}
+          cancelLabel={t('common.cancel')}
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setConfirmingDelete(null)}
         />
       ) : null}
     </nav>
