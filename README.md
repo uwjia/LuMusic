@@ -15,8 +15,9 @@ strictly layered architecture and tests accompanying every behavior.
   3.95+); raw ADTS `.aac` and the video `.mp4` container are deliberately
   not scanned)
 - Library folder watching (`notify`): new files appear, renames/moves and
-  deletes prune dead entries, and tag edits refresh — all merged silently
-  in debounced batches (IO outside the service lock; auto playlists
+  deletes prune dead entries (from the library, the auto playlists and
+  manual playlists alike), and tag edits refresh — all merged silently
+  in debounced batches (IO outside the service lock; folder playlists
   resync with each merge; the UI refreshes through the existing
   `library://updated` event)
 - Automatic mojibake repair: legacy GBK/Big5/Shift-JIS tags misread as Latin-1

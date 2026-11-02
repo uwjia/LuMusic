@@ -298,6 +298,12 @@ impl PlayerService {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         self.playlists.sync_auto(&specs, now);
+        // Manual playlists are curated subsets of the library: ids that
+        // vanished (renamed/moved/deleted file, or an out-of-root import
+        // pushed out by the rescan) must not linger as zombie rows with
+        // stale sidebar counts. Runs in both merge paths — watcher and
+        // full scan — so neither leaves dead ids behind.
+        self.playlists.retain_items(&keep);
 
         let summary = ScanSummary {
             root: root.display().to_string(),

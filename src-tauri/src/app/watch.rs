@@ -556,6 +556,110 @@ mod tests {
         assert!(emissions.lock().unwrap().is_empty());
     }
 
+    /// Regression shape for "watching only updates All Tracks": a new file
+    /// inside a first-level folder must land in that folder's playlist,
+    /// not only in All Tracks / Default.
+    #[test]
+    fn flush_files_new_tracks_into_their_folder_playlist() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let rock = dir.path().join("Rock");
+        std::fs::create_dir(&rock).unwrap();
+        let existing = rock.join("x.mp3");
+        let service = mock_service(dir.path(), vec![existing.clone()]);
+        service.lock().unwrap().scan_library(dir.path()).unwrap();
+        let playlists = service.lock().unwrap().playlists();
+        assert!(
+            playlists.iter().any(|p| p.name == "Rock" && p.items.len() == 1),
+            "precondition: folder playlist seeded by the scan"
+        );
+
+        // y.mp3 appears inside Rock/ on disk.
+        let added = rock.join("y.mp3");
+        std::fs::write(&added, b"x").unwrap();
+        let mut pending = HashMap::new();
+        pending.insert(added.clone(), Pending::Changed);
+        let outcome = flush(pending, &MockMetadata, &service, &|_summary| {});
+        assert_eq!(outcome.added, 1);
+
+        let guard = service.lock().unwrap();
+        let rock_playlist = guard
+            .playlists()
+            .into_iter()
+            .find(|p| p.name == "Rock")
+            .expect("folder playlist survives the merge");
+        assert_eq!(
+            rock_playlist.items,
+            vec![existing.to_string_lossy().into_owned(), added.to_string_lossy().into_owned()],
+            "the folder playlist must gain the watched file, not just All Tracks"
+        );
+    }
+
+    /// The user-facing shape of a rename on disk: the folder playlist must
+    /// swap the id, and manual playlists must lose the dead id (they never
+    /// gain the new one — curation is manual by design).
+    #[test]
+    fn renames_on_disk_resync_auto_playlists_and_prune_manual_ones() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let rock = dir.path().join("Rock");
+        let old = rock.join("x.mp3");
+        let service = mock_service(dir.path(), vec![old.clone()]);
+        service.lock().unwrap().scan_library(dir.path()).unwrap();
+        {
+            let mut guard = service.lock().unwrap();
+            let playlist = guard.create_playlist("Mix").unwrap();
+            guard.add_track_to_playlist(&playlist.id, old.to_string_lossy().into_owned()).unwrap();
+        }
+
+        // The file was renamed on disk: y.mp3 exists, x.mp3 does not.
+        std::fs::create_dir_all(&rock).unwrap();
+        let new = rock.join("y.mp3");
+        std::fs::write(&new, b"x").unwrap();
+        let mut pending = HashMap::new();
+        pending.insert(old.clone(), Pending::Removed);
+        pending.insert(new.clone(), Pending::Changed);
+
+        let outcome = flush(pending, &MockMetadata, &service, &|_summary| {});
+        assert_eq!((outcome.added, outcome.removed), (1, 1));
+
+        let guard = service.lock().unwrap();
+        // Folder playlist swapped the id.
+        let rock_playlist = guard
+            .playlists()
+            .into_iter()
+            .find(|p| p.name == "Rock")
+            .unwrap();
+        assert_eq!(rock_playlist.items, vec![new.to_string_lossy().into_owned()]);
+        // Manual playlist lost the dead entry instead of keeping a zombie.
+        let mix = guard.playlists().into_iter().find(|p| p.name == "Mix").unwrap();
+        assert_eq!(mix.items, Vec::<String>::new());
+        drop(guard);
+    }
+
+    /// Full scans prune dead ids from manual playlists too (the watcher
+    /// and the scan share `apply_scan`).
+    #[test]
+    fn rescans_prune_dead_ids_from_manual_playlists() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let gone = PathBuf::from("C:/gone/a.mp3");
+        let keep = PathBuf::from("C:/keep/b.mp3");
+        let service = mock_service(dir.path(), vec![gone.clone(), keep.clone()]);
+        service.lock().unwrap().scan_library(dir.path()).unwrap();
+        {
+            let mut guard = service.lock().unwrap();
+            let playlist = guard.create_playlist("Mix").unwrap();
+            guard.add_track_to_playlist(&playlist.id, gone.to_string_lossy().into_owned()).unwrap();
+        }
+        let summary = {
+            let mut guard = service.lock().unwrap();
+            let tracks = vec![Track::from_stem(&keep, 1)];
+            guard.apply_scan(dir.path(), 1, tracks, Vec::new())
+        };
+        assert_eq!(summary.removed, 1);
+        let guard = service.lock().unwrap();
+        let mix = guard.playlists().into_iter().find(|p| p.name == "Mix").unwrap();
+        assert_eq!(mix.items, Vec::<String>::new());
+    }
+
     // ---------- loop timing ----------
 
     /// Drives the real loop with synthetic events at a tiny settle window:

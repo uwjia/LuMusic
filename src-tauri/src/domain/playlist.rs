@@ -186,6 +186,24 @@ impl PlaylistCollection {
         changed
     }
 
+    /// Drops ids that no longer resolve in the library from every
+    /// **manual** playlist (auto playlists are rebuilt wholesale by
+    /// `sync_auto`). A renamed/moved/deleted file leaves a dead id behind
+    /// otherwise — stale sidebar counts and zombie rows that render as
+    /// nothing. Returns true when anything changed.
+    pub fn retain_items(&mut self, live_ids: &HashSet<TrackId>) -> bool {
+        let mut changed = false;
+        for (_, playlist) in self.playlists.iter_mut() {
+            if playlist.auto_generated {
+                continue;
+            }
+            let before = playlist.items.len();
+            playlist.items.retain(|id| live_ids.contains(id));
+            changed |= before != playlist.items.len();
+        }
+        changed
+    }
+
     /// Renames a playlist; the new name must be unique and non-empty.
     pub fn rename(&mut self, id: &str, new_name: &str) -> Result<(), PlaylistError> {
         let new_name = new_name.trim();
@@ -465,6 +483,36 @@ mod tests {
         let manual = c.get("m").unwrap();
         assert!(!manual.auto_generated);
         assert_eq!(manual.items, vec!["z".to_string()]);
+    }
+
+    #[test]
+    fn retain_items_prunes_manual_playlists_only() {
+        let mut c = PlaylistCollection::new();
+        c.create("Chill", "p1".into(), 1).unwrap();
+        c.add_track("p1", "a".into()).unwrap();
+        c.add_track("p1", "dead".into()).unwrap();
+        c.add_track("p1", "gone".into()).unwrap();
+        c.playlists.insert(
+            "auto:all".into(),
+            Playlist {
+                id: "auto:all".into(),
+                name: "All Tracks".into(),
+                // Autos own dead ids at this point; sync_auto rebuilds them
+                // and must not be pre-pruned behind its back.
+                items: vec!["a".into(), "dead".into()],
+                created_at: 1,
+                auto_generated: true,
+            },
+        );
+
+        let live: HashSet<TrackId> = ["a".to_string()].into_iter().collect();
+        assert!(c.retain_items(&live));
+        // Manual playlist lost exactly the dead ids.
+        assert_eq!(c.get("p1").unwrap().items, vec!["a".to_string()]);
+        // Auto playlist untouched (sync_auto owns it).
+        assert_eq!(c.get("auto:all").unwrap().items.len(), 2);
+        // Idempotent second pass reports no change.
+        assert!(!c.retain_items(&live));
     }
 
     #[test]
