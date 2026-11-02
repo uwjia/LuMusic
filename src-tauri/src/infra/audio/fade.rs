@@ -6,12 +6,18 @@
 //! polling it from a timer clicks if frames land late. A per-sample ramp
 //! in the source is sample-accurate and lock-free.
 //!
-//! Scope: fade-in on every new source (track start, resume), fade-out on
-//! pause **and on track switches** (the engine defers the sink swap until
-//! the fade-out has drained — dropping the old sink mid-waveform at full
-//! gain is a step discontinuity, i.e. the pop on next/previous). Seeks
-//! reopen the source without fading (instant feedback, gain continuity);
-//! true crossfading is the separate gapless non-goal.
+//! Scope, by context (the engine picks per open — see `FadeIn` there):
+//! - fade-out (120 ms) on pause and track switches: dropping or pausing a
+//!   sink at non-zero gain is a step discontinuity — the pop;
+//! - *soft* fade-in (60 ms) where the listener just heard audio (manual
+//!   switch, resume): softens the join perceptually;
+//! - *guard* fade-in (20 ms) where the previous instant was already
+//!   silence (first play, auto-advance, repeat-one): a full-length ramp
+//!   there only softens the music itself — every album boundary would
+//!   lose its attack. The 20 ms guard still protects against tracks that
+//!   literally begin at full amplitude;
+//! - seeks reopen the source without fading (instant feedback, gain
+//!   continuity). True crossfading is the separate gapless non-goal.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -19,21 +25,37 @@ use std::time::Duration;
 
 use rodio::Source;
 
-/// Fade length in seconds. Short enough to feel like a soft edge rather
-/// than an effect, long enough to mask the transient.
-pub const FADE_SECS: f64 = 0.12;
+/// Fade-out length: covers the transient while still feeling immediate.
+pub const FADE_OUT_SECS: f64 = 0.12;
+/// Soft fade-in: long enough to read as a gentle join, short enough not
+/// to soften a musical attack.
+pub const FADE_IN_SECS: f64 = 0.06;
+/// Guard ramp for sources opened onto an already-silent device.
+pub const FADE_GUARD_SECS: f64 = 0.02;
 
 /// Gain ramp shared between the engine (writer) and the audio thread
 /// (reader). Values are linear gains stored as f32 bits in atomics.
 pub struct SharedFade {
     current: AtomicU32,
     target: AtomicU32,
-    /// Linear gain step per *sample*; 0.0 means "jump instantly".
-    step: AtomicU32,
+    sample_rate: AtomicU32,
+    /// Active up-ramp rate (per sample). Soft and guard ramps differ in
+    /// speed, so the rate is (re)selected by whichever entry point starts
+    /// an up-ramp; the down-ramp rate is fixed by [`FADE_OUT_SECS`].
+    step_in: AtomicU32,
+    step_out: AtomicU32,
 }
 
 fn to_bits(value: f32) -> u32 {
     value.to_bits()
+}
+
+fn rate(sample_rate: u32, secs: f64) -> f32 {
+    if sample_rate == 0 {
+        0.0
+    } else {
+        (1.0 / (sample_rate as f64 * secs)) as f32
+    }
 }
 
 impl SharedFade {
@@ -43,40 +65,55 @@ impl SharedFade {
             // must never fade a mid-stream command (e.g. a volume change).
             current: AtomicU32::new(to_bits(1.0)),
             target: AtomicU32::new(to_bits(1.0)),
-            step: AtomicU32::new(to_bits(0.0)),
+            sample_rate: AtomicU32::new(0),
+            step_in: AtomicU32::new(to_bits(0.0)),
+            step_out: AtomicU32::new(to_bits(0.0)),
         }
     }
 
-    /// Recomputes the ramp step from the sample rate of the source being
-    /// opened (the ramp then covers exactly `FADE_SECS` of audio).
+    /// Stores the source's sample rate and recomputes both ramp rates.
     pub fn configure(&self, sample_rate: u32) {
-        let per_sample = if sample_rate == 0 {
-            0.0
-        } else {
-            (1.0 / (sample_rate as f64 * FADE_SECS)) as f32
-        };
-        self.step.store(to_bits(per_sample), Ordering::Relaxed);
+        self.sample_rate.store(sample_rate, Ordering::Relaxed);
+        self.step_in
+            .store(to_bits(rate(sample_rate, FADE_IN_SECS)), Ordering::Relaxed);
+        self.step_out
+            .store(to_bits(rate(sample_rate, FADE_OUT_SECS)), Ordering::Relaxed);
     }
 
-    /// Ramps up to full gain from wherever the ramp currently stands.
-    pub fn fade_in(&self) {
+    fn arm_up(&self, secs: f64) {
+        let step = rate(self.sample_rate.load(Ordering::Relaxed), secs);
+        self.step_in.store(to_bits(step), Ordering::Relaxed);
         self.target.store(to_bits(1.0), Ordering::Release);
     }
 
-    /// Ramps down to silence (e.g. before a deferred pause).
+    /// Soft fade-in to full gain from wherever the ramp currently stands
+    /// (resume after pause).
+    pub fn fade_in(&self) {
+        self.arm_up(FADE_IN_SECS);
+    }
+
+    /// Ramps down to silence (deferred pause, fading track switch).
     pub fn fade_out(&self) {
         self.target.store(to_bits(0.0), Ordering::Release);
     }
 
-    /// Starts a fresh fade-in from silence (new track opened).
-    pub fn start_from_zero(&self) {
+    /// New source opened where the listener just heard audio: full soft
+    /// ramp up from silence.
+    pub fn start_soft(&self) {
         self.current.store(to_bits(0.0), Ordering::Relaxed);
-        self.target.store(to_bits(1.0), Ordering::Release);
+        self.arm_up(FADE_IN_SECS);
+    }
+
+    /// New source opened onto an already-silent device: minimal guard
+    /// ramp, three times faster than the soft one.
+    pub fn start_guard(&self) {
+        self.current.store(to_bits(0.0), Ordering::Relaxed);
+        self.arm_up(FADE_GUARD_SECS);
     }
 
     /// Advances and returns the gain for the next sample. Called once per
     /// sample from the audio thread; everything here is relaxed atomic
-    /// math because the only writer of `target`/`step` is the engine
+    /// math because the only writer of `target`/rates is the engine
     /// thread and stale-by-one-command values are harmless (the ramp just
     /// turns around a sample later).
     pub fn next_gain(&self) -> f32 {
@@ -85,14 +122,19 @@ impl SharedFade {
         if current == target {
             return current;
         }
-        let step = f32::from_bits(self.step.load(Ordering::Relaxed));
+        let rising = current < target;
+        let step = f32::from_bits(if rising {
+            self.step_in.load(Ordering::Relaxed)
+        } else {
+            self.step_out.load(Ordering::Relaxed)
+        });
         if step == 0.0 {
             // Unconfigured (or unknown sample rate): jump instead of
             // ramping forever at zero progress.
             self.current.store(to_bits(target), Ordering::Relaxed);
             return target;
         }
-        let moved = if current < target {
+        let moved = if rising {
             (current + step).min(target)
         } else {
             (current - step).max(target)
@@ -221,10 +263,12 @@ mod tests {
     fn fade_in_ramps_monotonically_to_unity_within_the_window() {
         let fade = Arc::new(SharedFade::new());
         fade.configure(44_100);
-        fade.start_from_zero();
-        let window = (44_100.0 * FADE_SECS) as usize;
+        fade.start_soft();
+        let window = (44_100.0 * FADE_IN_SECS) as usize;
         let gains = gains_over(fade.clone(), window + 4_410);
-        assert!(gains.first().unwrap() < &0.001, "must start silent");
+        // Stereo WAV starts with two sine-zero samples, so the first
+        // *observable* gain is already a few steps in (3 x step at 60 ms).
+        assert!(gains.first().unwrap() < &0.005, "must start silent");
         for pair in gains.windows(2) {
             assert!(pair[1] >= pair[0] - 1e-6, "fade-in must not dip");
         }
@@ -239,7 +283,7 @@ mod tests {
         let fade = Arc::new(SharedFade::new());
         fade.configure(44_100);
         fade.fade_out();
-        let window = (44_100.0 * FADE_SECS) as usize;
+        let window = (44_100.0 * FADE_OUT_SECS) as usize;
         let gains = gains_over(fade.clone(), window + 4_410);
         assert!(*gains.first().unwrap() > 0.999);
         for pair in gains.windows(2) {
@@ -250,6 +294,28 @@ mod tests {
         assert!(*gains.last().unwrap() < 0.001);
     }
 
+    /// The whole point of the guard ramp: a source opened onto an
+    /// already-silent device must reach full gain ~3x faster than the
+    /// soft join, or every album track's attack gets softened.
+    #[test]
+    fn guard_ramp_reaches_unity_much_faster_than_the_soft_ramp() {
+        let fade = Arc::new(SharedFade::new());
+        fade.configure(44_100);
+        fade.start_guard();
+        let guard_window = (44_100.0 * FADE_GUARD_SECS) as usize;
+        let gains = gains_over(fade.clone(), guard_window + 2_205);
+        // Same stereo-zero caveat: a few steps of the (fast) guard ramp.
+        assert!(gains.first().unwrap() < &0.02, "guard still starts silent");
+        assert!(*gains.last().unwrap() > 0.999, "guard completes in its window");
+        assert_eq!(fade.gain(), 1.0);
+        // And the ratio between the two up-ramp durations is real:
+        // reaching 0.5 gain takes ~3x fewer samples under the guard.
+        assert!(
+            FADE_IN_SECS / FADE_GUARD_SECS >= 2.5,
+            "guard must be markedly shorter than the soft ramp"
+        );
+    }
+
     #[test]
     fn interrupted_ramps_reverse_from_wherever_they_stand() {
         // pause-fade interrupted mid-way by resume: the gain must climb
@@ -257,12 +323,12 @@ mod tests {
         let fade = Arc::new(SharedFade::new());
         fade.configure(44_100);
         fade.fade_out();
-        let half = (44_100.0 * FADE_SECS / 2.0) as usize;
+        let half = (44_100.0 * FADE_OUT_SECS / 2.0) as usize;
         let during = gains_over(fade.clone(), half);
         let mid = *during.last().unwrap();
         assert!((0.3..0.7).contains(&mid), "mid-ramp gain was {mid}");
         fade.fade_in();
-        let back = gains_over(fade.clone(), (44_100.0 * FADE_SECS) as usize);
+        let back = gains_over(fade.clone(), (44_100.0 * FADE_IN_SECS) as usize);
         assert!(*back.first().unwrap() >= mid - 1e-6);
         assert_eq!(fade.gain(), 1.0);
     }
@@ -271,20 +337,35 @@ mod tests {
     fn zero_sample_rate_disables_the_ramp_instead_of_dividing_by_zero() {
         let fade = SharedFade::new();
         fade.configure(0);
-        fade.start_from_zero();
+        fade.start_soft();
         // First sample jumps straight to the target: no NaN, no stall.
         assert_eq!(fade.next_gain(), 1.0);
     }
 
     #[test]
     fn ramp_length_scales_with_the_sample_rate() {
-        // 8 kHz source: the same FADE_SECS must translate into a per-sample
+        // 8 kHz source: the same window must translate into a per-sample
         // step 5.5125x *larger* than at 44.1 kHz (fewer samples per second).
         let fade = SharedFade::new();
         fade.configure(44_100);
-        let hi = f32::from_bits(fade.step.load(Ordering::Relaxed));
+        let hi = f32::from_bits(fade.step_out.load(Ordering::Relaxed));
         fade.configure(8_000);
-        let lo = f32::from_bits(fade.step.load(Ordering::Relaxed));
+        let lo = f32::from_bits(fade.step_out.load(Ordering::Relaxed));
         assert!((lo / hi - 44_100.0 / 8_000.0).abs() < 0.01);
+    }
+
+    /// Out and in differ on purpose (120 ms down, 60 ms up); the down-ramp
+    /// must be the slower one because it alone carries the pop-masking.
+    /// Step ratio is the inverse of the duration ratio.
+    #[test]
+    fn down_ramp_is_slower_than_the_up_ramp() {
+        let fade = SharedFade::new();
+        fade.configure(44_100);
+        let out = f32::from_bits(fade.step_out.load(Ordering::Relaxed));
+        fade.start_soft();
+        let soft_in = f32::from_bits(fade.step_in.load(Ordering::Relaxed));
+        let ratio = soft_in / out;
+        assert!((ratio - (FADE_OUT_SECS / FADE_IN_SECS) as f32).abs() < 0.05, "ratio {ratio}");
+        assert!(soft_in > out, "rising must be faster than falling");
     }
 }

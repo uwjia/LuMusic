@@ -16,12 +16,39 @@ use rodio::{OutputStream, OutputStreamHandle, Sink};
 
 use super::ape_source::{ApeDecoderStream, ApeSource};
 use super::equalizer::{EqualizerSource, SharedEq};
-use super::fade::{FadeSource, SharedFade, FADE_SECS};
+use super::fade::{FadeSource, SharedFade, FADE_OUT_SECS};
 use super::spectrum::{SpectrumAnalyzer, SpectrumTap};
 use super::symphonia_source::{PosTracker, SourceError, SymphoniaSource};
 use crate::domain::equalizer::EqSettings;
 use crate::domain::spectrum::FFT_SIZE;
 use symphonia::core::io::MediaSourceStream;
+
+/// How a freshly opened source ramps up. Derived *in the engine* from
+/// what the audio thread already knows: whether the outgoing sink was
+/// sounding when the open arrived — no service/API surface needed.
+enum FadeIn {
+    /// The listener just heard audio (fading manual switch): a soft ramp
+    /// turns the seam into a gentle dip instead of "smooth down, then
+    /// BAM".
+    Soft,
+    /// The previous instant was already silence (first play, auto
+    /// advance, repeat-one, switch from a paused sink): a full ramp here
+    /// would only soften the music's own attack on every album boundary.
+    /// The short guard just protects against tracks that begin at full
+    /// amplitude.
+    Guard,
+    /// No ramp (seek reopen): keeps the current gain so jumping inside a
+    /// track never dips the audio.
+    None,
+}
+
+impl Copy for FadeIn {}
+
+impl Clone for FadeIn {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
 /// True for files the APE adapter owns (symphonia has no APE codec).
 /// Case-insensitive, mirroring `domain::scan::is_audio_file`.
@@ -323,21 +350,24 @@ fn arm_deferred(
 ) {
     let tx = tx.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs_f64(FADE_SECS) + DEFER_MARGIN);
+        // Deferred follow-ups trail a *fade-out* — see DEFER_MARGIN for
+        // why the pull-domain drain needs the slack.
+        std::thread::sleep(Duration::from_secs_f64(FADE_OUT_SECS) + DEFER_MARGIN);
         if token.load(Ordering::SeqCst) == generation {
             let _ = tx.send(make());
         }
     });
 }
 
-/// Opens `path` as the new sink (fade-in), honoring `start_paused`.
+/// Opens `path` as the new sink, honoring `start_paused`.
 fn open_source(
     state: &mut DeviceState,
     path: &Path,
     at_secs: Option<f64>,
     start_paused: bool,
+    fade_in: FadeIn,
 ) -> Result<Arc<PosTracker>, AudioError> {
-    state.open_at(path, at_secs, true).map(|tracker| {
+    state.open_at(path, at_secs, fade_in).map(|tracker| {
         if start_paused {
             if let Some(sink) = &state.sink {
                 sink.pause();
@@ -361,14 +391,14 @@ impl DeviceState {
 
     /// (Re)creates the sink for `path`, optionally starting at `at_secs`.
     ///
-    /// `fade_in` ramps the new source up from silence (every track start);
-    /// the seek path passes `false` so jumping inside a track keeps the
-    /// current gain instead of dipping the audio.
+    /// `fade_in` selects the up-ramp by context (see [`FadeIn`]); it is
+    /// published *before* the sink is appended so the device can never
+    /// pull an unramped first sample.
     fn open_at(
         &mut self,
         path: &Path,
         at_secs: Option<f64>,
-        fade_in: bool,
+        fade_in: FadeIn,
     ) -> Result<Arc<PosTracker>, AudioError> {
         let mut source = DecodedSource::open(path)?;
         if let Some(secs) = at_secs {
@@ -377,9 +407,10 @@ impl DeviceState {
         let tracker = source.position_tracker();
         self.sample_rate = source.sample_rate();
         self.fade.configure(self.sample_rate);
-        if fade_in {
-            // Publish the silent start before the sink can pull samples.
-            self.fade.start_from_zero();
+        match fade_in {
+            FadeIn::Soft => self.fade.start_soft(),
+            FadeIn::Guard => self.fade.start_guard(),
+            FadeIn::None => {}
         }
         let sink = Sink::try_new(&self.handle).map_err(|_| AudioError::NoDevice)?;
         sink.set_volume(self.volume);
@@ -558,7 +589,10 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
                         reply,
                     });
                 } else {
-                    let result = open_source(&mut state, &path, at_secs, start_paused);
+                    // Nothing audible precedes this open (idle, paused or
+                    // drained old sink): only a guard ramp, so album
+                    // boundaries and repeat-one keeps their attack.
+                    let result = open_source(&mut state, &path, at_secs, start_paused, FadeIn::Guard);
                     if let Ok(tracker) = &result {
                         last_tracker = Some(tracker.clone());
                     }
@@ -568,8 +602,16 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
             Command::OpenNow { generation } => {
                 if generation == state.command_generation.load(Ordering::SeqCst) {
                     if let Some(pending) = pending_open.take() {
-                        let result =
-                            open_source(&mut state, &pending.path, pending.at_secs, pending.start_paused);
+                        // The outgoing track faded to zero before this
+                        // swap: the soft ramp shapes the join perceptually
+                        // (the pop itself is already gone with the fade).
+                        let result = open_source(
+                            &mut state,
+                            &pending.path,
+                            pending.at_secs,
+                            pending.start_paused,
+                            FadeIn::Soft,
+                        );
                         if let Ok(tracker) = &result {
                             last_tracker = Some(tracker.clone());
                         }
@@ -645,9 +687,9 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
                 let result = match state.path.clone() {
                     // Reopening is the seek: a new source positioned at
                     // `secs`, wrapped in a fresh sink (EQ/spectrum intact).
-                    // Gain continuity is kept (no fade_in) so seeking never
+                    // Gain continuity is kept (no ramp) so seeking never
                     // dips the audio.
-                    Some(path) => state.open_at(&path, Some(secs), false).map(Some),
+                    Some(path) => state.open_at(&path, Some(secs), FadeIn::None).map(Some),
                     None => Ok(None), // nothing loaded: seek is a no-op
                 };
                 if let Ok(Some(tracker)) = &result {
