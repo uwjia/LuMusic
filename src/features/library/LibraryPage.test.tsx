@@ -83,7 +83,7 @@ describe('LibraryPage', () => {
     vi.mocked(api.playerLoad).mockClear();
     render(<LibraryPage onOpenSettings={() => {}} />);
     fireEvent.doubleClick(screen.getByTestId('track-row-0'));
-    expect(api.playerLoad).toHaveBeenCalledWith(['t1'], 0);
+    expect(api.playerLoad).toHaveBeenCalledWith(['t1'], 0, undefined);
   });
 
   it('shows the scan progress bar while scanning', () => {

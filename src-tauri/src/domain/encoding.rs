@@ -70,7 +70,8 @@ pub fn fix_mojibake(text: &str) -> String {
         }
     }
 
-    best.map(|(_, text)| text).unwrap_or_else(|| text.to_string())
+    best.map(|(_, text)| text)
+        .unwrap_or_else(|| text.to_string())
 }
 
 /// True when every char maps back to a single Latin-1 byte.
@@ -87,7 +88,9 @@ fn is_bad_char(c: char) -> bool {
 }
 
 fn latin1_count(text: &str) -> usize {
-    text.chars().filter(|c| is_latin1_supp(*c) || is_bad_char(*c)).count()
+    text.chars()
+        .filter(|c| is_latin1_supp(*c) || is_bad_char(*c))
+        .count()
 }
 
 /// Higher is better. CJK content earns points; mojibake indicators cost more.
@@ -210,4 +213,3 @@ mod tests {
         );
     }
 }
-

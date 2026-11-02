@@ -18,7 +18,9 @@ fn will_do_sample_associates_and_parses() {
     }
 
     // Association: the sibling .lrc is found and decoded (UTF-8 + BOM).
-    let loaded = FsLyricSource.load(audio).expect("will_do.lrc sits next to will_do.mp3");
+    let loaded = FsLyricSource
+        .load(audio)
+        .expect("will_do.lrc sits next to will_do.mp3");
     assert!(loaded.path.ends_with("will_do.lrc"), "{:?}", loaded.path);
     assert!(!loaded.text.starts_with('\u{FEFF}'));
 
@@ -26,13 +28,25 @@ fn will_do_sample_associates_and_parses() {
     // interludes kept, output time-sorted.
     let lyrics = parse_lrc(&loaded.text);
     assert_eq!(lyrics.offset_ms, 500);
-    assert!(lyrics.lines.iter().any(|l| l.text == "I will do do do do do"));
+    assert!(lyrics
+        .lines
+        .iter()
+        .any(|l| l.text == "I will do do do do do"));
     let repeats = lyrics
         .lines
         .iter()
         .filter(|l| l.text == "Yes I will do do do do do")
         .count();
-    assert_eq!(repeats, 3, "the 3-timestamp chorus line expands to 3 entries");
-    assert!(lyrics.lines.iter().any(|l| l.text.is_empty()), "interlude markers kept");
-    assert!(lyrics.lines.windows(2).all(|w| w[0].time_ms <= w[1].time_ms));
+    assert_eq!(
+        repeats, 3,
+        "the 3-timestamp chorus line expands to 3 entries"
+    );
+    assert!(
+        lyrics.lines.iter().any(|l| l.text.is_empty()),
+        "interlude markers kept"
+    );
+    assert!(lyrics
+        .lines
+        .windows(2)
+        .all(|w| w[0].time_ms <= w[1].time_ms));
 }

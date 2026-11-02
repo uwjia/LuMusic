@@ -193,7 +193,10 @@ mod tests {
         let lyrics = parse_lrc(
             "[ti:I Will Do]\n[ar:Pierre]\n[al:Booom]\n[by:someone]\n[00:00.76]I will do do do\n[00:03.10]I'll do anything for you\n",
         );
-        assert_eq!(texts(&lyrics), ["I will do do do", "I'll do anything for you"]);
+        assert_eq!(
+            texts(&lyrics),
+            ["I will do do do", "I'll do anything for you"]
+        );
         assert_eq!(times(&lyrics), [760, 3100]);
         assert_eq!(lyrics.offset_ms, 0);
     }
@@ -201,10 +204,12 @@ mod tests {
     #[test]
     fn multiple_time_tags_expand_and_sort_by_time() {
         // The later verse carries an earlier repeat: output must be sorted.
-        let lyrics =
-            parse_lrc("[01:23.09][00:32.40]Late at night when we are all by ourselves\n");
+        let lyrics = parse_lrc("[01:23.09][00:32.40]Late at night when we are all by ourselves\n");
         assert_eq!(times(&lyrics), [32_400, 83_090]);
-        assert_eq!(texts(&lyrics), ["Late at night when we are all by ourselves"; 2]);
+        assert_eq!(
+            texts(&lyrics),
+            ["Late at night when we are all by ourselves"; 2]
+        );
     }
 
     #[test]
@@ -223,9 +228,7 @@ mod tests {
 
     #[test]
     fn timestamp_variants_are_supported() {
-        let lyrics = parse_lrc(
-            "[00:12]A\n[00:12,5]B\n[00:12.562]C\n[01:02:03.5]D\n",
-        );
+        let lyrics = parse_lrc("[00:12]A\n[00:12,5]B\n[00:12.562]C\n[01:02:03.5]D\n");
         assert_eq!(
             times(&lyrics),
             [12_000, 12_500, 12_562, (1 * 3600 + 2 * 60 + 3) * 1000 + 500]

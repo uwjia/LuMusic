@@ -169,7 +169,9 @@ impl TrayController {
             MENU_TOGGLE,
             toggle_label(&labels, state.status),
             true,
-            Some(menu_icon(toggle_glyph(state.status == PlaybackStatus::Playing))),
+            Some(menu_icon(toggle_glyph(
+                state.status == PlaybackStatus::Playing,
+            ))),
             None::<&str>,
         )?;
         let next = IconMenuItem::with_id(
@@ -261,9 +263,13 @@ impl TrayController {
     /// have no actionable error handling, so they are logged at most for
     /// the tooltip and ignored otherwise.
     fn refresh(&self) {
-        let _ = self.now_playing.set_text(now_playing_label(&self.labels, &self.state));
+        let _ = self
+            .now_playing
+            .set_text(now_playing_label(&self.labels, &self.state));
         let _ = self.previous.set_text(self.labels.previous.clone());
-        let _ = self.toggle.set_text(toggle_label(&self.labels, self.state.status));
+        let _ = self
+            .toggle
+            .set_text(toggle_label(&self.labels, self.state.status));
         let playing = self.state.status == PlaybackStatus::Playing;
         let _ = self.toggle.set_icon(Some(if playing {
             // Image is a cheap 1KB Cow clone; state changes are rare.
@@ -374,6 +380,7 @@ mod tests {
             volume: 0.8,
             shuffle: false,
             repeat: RepeatMode::Off,
+            queue_source_id: None,
         }
     }
 
@@ -439,7 +446,10 @@ mod tests {
         // menu: exactly MAX chars, cut marked with an ellipsis.
         let mut long = track(None);
         long.title = "A".repeat(120);
-        let label = now_playing_label(&TrayLabels::default(), &state(PlaybackStatus::Playing, Some(long)));
+        let label = now_playing_label(
+            &TrayLabels::default(),
+            &state(PlaybackStatus::Playing, Some(long)),
+        );
         assert_eq!(label.chars().count(), MAX_TRACK_LABEL_CHARS);
         assert!(label.ends_with('…'));
 

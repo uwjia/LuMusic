@@ -81,7 +81,12 @@ impl PlaylistCollection {
     }
 
     /// Creates a playlist with a unique name. Returns the new playlist.
-    pub fn create(&mut self, name: &str, id: String, created_at: u64) -> Result<Playlist, PlaylistError> {
+    pub fn create(
+        &mut self,
+        name: &str,
+        id: String,
+        created_at: u64,
+    ) -> Result<Playlist, PlaylistError> {
         let name = name.trim();
         if name.is_empty() {
             return Err(PlaylistError::EmptyName);
@@ -266,7 +271,10 @@ mod tests {
     #[test]
     fn create_validates_name_and_duplicates() {
         let mut c = collection();
-        assert_eq!(c.create("  ", "p2".into(), 1), Err(PlaylistError::EmptyName));
+        assert_eq!(
+            c.create("  ", "p2".into(), 1),
+            Err(PlaylistError::EmptyName)
+        );
         assert_eq!(
             c.create("road trip", "p2".into(), 1),
             Err(PlaylistError::DuplicateName("road trip".into()))
@@ -299,10 +307,7 @@ mod tests {
         let mut c = collection();
         c.delete("p1").unwrap();
         assert!(c.is_empty());
-        assert_eq!(
-            c.delete("p1"),
-            Err(PlaylistError::NotFound("p1".into()))
-        );
+        assert_eq!(c.delete("p1"), Err(PlaylistError::NotFound("p1".into())));
     }
 
     #[test]
@@ -366,7 +371,10 @@ mod tests {
 
         // First scan: two auto playlists appear.
         let changed = c.sync_auto(
-            &[spec("auto:all", "All Tracks", &["a", "b"]), spec("auto:dir:X", "X", &["a"])],
+            &[
+                spec("auto:all", "All Tracks", &["a", "b"]),
+                spec("auto:dir:X", "X", &["a"]),
+            ],
             200,
         );
         assert!(changed);
@@ -375,20 +383,29 @@ mod tests {
 
         // Second scan: folder X renamed to Y (id gone -> pruned), All grows.
         let changed = c.sync_auto(
-            &[spec("auto:all", "All Tracks", &["a", "b", "c"]), spec("auto:dir:Y", "Y", &["b", "c"])],
+            &[
+                spec("auto:all", "All Tracks", &["a", "b", "c"]),
+                spec("auto:dir:Y", "Y", &["b", "c"]),
+            ],
             300,
         );
         assert!(changed);
         assert!(c.get("auto:dir:X").is_none());
         assert_eq!(c.get("auto:all").unwrap().items.len(), 3);
-        assert_eq!(c.get("auto:dir:Y").unwrap().items, vec!["b".to_string(), "c".to_string()]);
+        assert_eq!(
+            c.get("auto:dir:Y").unwrap().items,
+            vec!["b".to_string(), "c".to_string()]
+        );
         // Manual playlist untouched.
         assert_eq!(c.get("p1").unwrap().name, "Chill");
         assert_eq!(c.get("p1").unwrap().items, Vec::<String>::new());
 
         // Idempotent rescan reports no change.
         assert!(!c.sync_auto(
-            &[spec("auto:all", "All Tracks", &["a", "b", "c"]), spec("auto:dir:Y", "Y", &["b", "c"])],
+            &[
+                spec("auto:all", "All Tracks", &["a", "b", "c"]),
+                spec("auto:dir:Y", "Y", &["b", "c"])
+            ],
             400
         ));
     }

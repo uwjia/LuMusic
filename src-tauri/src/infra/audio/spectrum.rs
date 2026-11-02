@@ -40,8 +40,7 @@ impl SpectrumTap {
     #[inline]
     pub fn push(&self, sample: f32) {
         let index = self.written.load(Ordering::Relaxed);
-        self.slots[index & (self.slots.len() - 1)]
-            .store(sample.to_bits(), Ordering::Relaxed);
+        self.slots[index & (self.slots.len() - 1)].store(sample.to_bits(), Ordering::Relaxed);
         self.written.store(index + 1, Ordering::Release);
     }
 

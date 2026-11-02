@@ -65,7 +65,10 @@ pub fn run() {
             app::commands::tray_set_labels,
         ])
         .setup(|app| {
-            let data_dir = app.path().app_data_dir().expect("app data dir is resolvable");
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("app data dir is resolvable");
             let service = app::state::build(&data_dir).expect("service builds");
             app.manage(service);
 
@@ -147,7 +150,9 @@ pub fn run() {
         .run(|app, event| match event {
             // `code == None` means the last window closed (close-to-tray
             // off). Only the setting keeps the process alive in the tray.
-            tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
                 // The State guard must outlive the MutexGuard borrow.
                 let close_to_tray = app
                     .try_state::<SharedService>()

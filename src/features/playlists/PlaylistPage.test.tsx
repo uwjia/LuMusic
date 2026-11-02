@@ -101,4 +101,28 @@ describe('PlaylistPage', () => {
     render(<PlaylistPage playlistId="gone" />);
     expect(screen.getByText('Playlist not found')).toBeInTheDocument();
   });
+
+  it('playing a row names this playlist as the queue source', async () => {
+    // The source reaches the backend, is persisted with the session and
+    // comes back inside the state — the sidebar speaker survives restarts.
+    const { fireEvent } = await import('@testing-library/react');
+    vi.mocked(api.playerLoad).mockResolvedValue({
+      status: 'playing',
+      currentTrack: tracks[1],
+      queuePosition: 1,
+      queueLen: 2,
+      positionSecs: 0,
+      durationSecs: 60,
+      volume: 0.8,
+      shuffle: false,
+      repeat: 'off',
+      queueSourceId: 'p1',
+    });
+    render(<PlaylistPage playlistId="p1" />);
+    fireEvent.doubleClick(screen.getByTestId('track-row-1'));
+    await vi.waitFor(() =>
+      expect(api.playerLoad).toHaveBeenCalledWith(['a', 'b'], 1, 'p1'),
+    );
+    expect(usePlayerStore.getState().state?.queueSourceId).toBe('p1');
+  });
 });

@@ -7,14 +7,16 @@ import { api } from '@/api';
 import type { PlayerState, RepeatMode } from '@/types/track';
 
 interface PlayerStoreState {
-  /** Last known backend state; null until the first fetch completes. */
+  /** Last known backend state; null until the first fetch completes.
+   *  Carries `queueSourceId` — persisted in the backend session, so the
+   *  sidebar playing indicator survives restarts. */
   state: PlayerState | null;
   /** Set when the latest command failed (surfaces as a toast). */
   error: string | null;
   applyState: (state: PlayerState) => void;
   setError: (error: string | null) => void;
   refresh: () => Promise<void>;
-  load: (ids: string[], startIndex?: number) => Promise<void>;
+  load: (ids: string[], startIndex?: number, sourcePlaylistId?: string) => Promise<void>;
   toggle: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
@@ -76,7 +78,10 @@ export const usePlayerStore = create<PlayerStoreState>((set) => ({
   setError: (error) => set({ error }),
 
   refresh: () => run(set, () => api.playerState()),
-  load: (ids, startIndex) => run(set, () => api.playerLoad(ids, startIndex)),
+  load: (ids, startIndex, sourcePlaylistId) =>
+    // The source flows to the backend and comes back inside the state:
+    // one representation, consistent across restarts and pushed events.
+    run(set, () => api.playerLoad(ids, startIndex, sourcePlaylistId)),
   toggle: () => run(set, () => api.playerToggle()),
   pause: () => run(set, () => api.playerPause()),
   resume: () => run(set, () => api.playerResume()),

@@ -92,6 +92,7 @@ class MockApi implements PlayerApi {
   private playlists: Playlist[] = [];
   private queue: Track[] = [];
   private queuePosition: number | null = null;
+  private queueSource: string | null = null;
   private status: PlayerState['status'] = 'stopped';
   private positionSecs = 0;
   private volume = 0.8;
@@ -131,6 +132,7 @@ class MockApi implements PlayerApi {
       volume: this.volume,
       shuffle: this.shuffle,
       repeat: this.repeat,
+      queueSourceId: this.queueSource,
     };
   }
 
@@ -276,13 +278,14 @@ class MockApi implements PlayerApi {
     return this.snapshot();
   }
 
-  async playerLoad(ids: string[], startIndex?: number) {
+  async playerLoad(ids: string[], startIndex?: number, sourcePlaylistId?: string) {
     this.queue = ids
       .map((id) => this.tracks.find((t) => t.id === id))
       .filter((t): t is Track => Boolean(t));
     this.queuePosition = Math.min(startIndex ?? 0, Math.max(0, this.queue.length - 1));
     this.positionSecs = 0;
     this.status = 'playing';
+    this.queueSource = sourcePlaylistId ?? null;
     this.ensureTicker();
     this.publish();
     return this.snapshot();

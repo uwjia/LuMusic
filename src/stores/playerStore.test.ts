@@ -65,7 +65,30 @@ describe('playerStore', () => {
   it('load passes ids and start index', async () => {
     vi.mocked(api.playerLoad).mockResolvedValue(playing());
     await usePlayerStore.getState().load(['a', 'b'], 1);
-    expect(api.playerLoad).toHaveBeenCalledWith(['a', 'b'], 1);
+    // The source slot is always forwarded (undefined = library playback).
+    expect(api.playerLoad).toHaveBeenCalledWith(['a', 'b'], 1, undefined);
+  });
+
+  it('load forwards the source playlist and mirrors it from the state', async () => {
+    // The source rides the returned state (persisted backend-side), so a
+    // restart that restores the session still lights the indicator.
+    vi.mocked(api.playerLoad).mockResolvedValue(playing({ queueSourceId: 'auto:all' }));
+    await usePlayerStore.getState().load(['a'], 0, 'auto:all');
+    expect(api.playerLoad).toHaveBeenCalledWith(['a'], 0, 'auto:all');
+    expect(usePlayerStore.getState().state?.queueSourceId).toBe('auto:all');
+    // Library playback carries no source; the echoed state clears it.
+    vi.mocked(api.playerLoad).mockResolvedValue(playing({ queueSourceId: null }));
+    await usePlayerStore.getState().load(['a']);
+    expect(usePlayerStore.getState().state?.queueSourceId).toBeNull();
+  });
+
+  it('load keeps the previous state when the command fails', async () => {
+    vi.mocked(api.playerLoad).mockResolvedValueOnce(playing({ queueSourceId: 'p1' }));
+    await usePlayerStore.getState().load(['a'], 0, 'p1');
+    vi.mocked(api.playerLoad).mockRejectedValueOnce(new Error('boom'));
+    await usePlayerStore.getState().load(['b'], 0, 'p2');
+    expect(usePlayerStore.getState().state?.queueSourceId).toBe('p1');
+    expect(usePlayerStore.getState().error).toBe('boom');
   });
 
   it('cyclePlayMode walks sequential -> repeat all -> repeat one -> shuffle', async () => {

@@ -59,10 +59,12 @@ pub fn find_lrc_path(audio_path: &Path) -> Option<PathBuf> {
         .map(|entry| entry.path())
         .filter(|path| {
             path.is_file()
-                && path.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("lrc"))
-                && path.file_stem().is_some_and(|s| {
-                    s.to_string_lossy().to_lowercase() == stem
-                })
+                && path
+                    .extension()
+                    .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("lrc"))
+                && path
+                    .file_stem()
+                    .is_some_and(|s| s.to_string_lossy().to_lowercase() == stem)
         })
         .collect();
     // read_dir order is filesystem-dependent; sort keeps repeats stable.
@@ -108,7 +110,10 @@ mod tests {
     fn finds_sibling_lrc_and_strips_bom() {
         let dir = dir_with_files(&[
             ("will_do.mp3", b"audio"),
-            ("will_do.lrc", b"\xEF\xBB\xBF[00:01.00]\xE6\x99\xB4\xE5\xA4\xA9"),
+            (
+                "will_do.lrc",
+                b"\xEF\xBB\xBF[00:01.00]\xE6\x99\xB4\xE5\xA4\xA9",
+            ),
         ]);
         let loaded = FsLyricSource
             .load(&dir.path().join("will_do.mp3"))
@@ -120,15 +125,9 @@ mod tests {
 
     #[test]
     fn stem_and_extension_match_case_insensitively() {
-        let dir = dir_with_files(&[
-            ("Will Do.mp3", b"audio"),
-            ("WILL DO.LRC", b"[00:01.00]hi"),
-        ]);
+        let dir = dir_with_files(&[("Will Do.mp3", b"audio"), ("WILL DO.LRC", b"[00:01.00]hi")]);
         let loaded = FsLyricSource.load(&dir.path().join("Will Do.mp3"));
-        assert_eq!(
-            loaded.map(|l| l.path),
-            Some(dir.path().join("WILL DO.LRC"))
-        );
+        assert_eq!(loaded.map(|l| l.path), Some(dir.path().join("WILL DO.LRC")));
     }
 
     #[test]
@@ -167,11 +166,7 @@ mod tests {
 
     #[test]
     fn find_lrc_path_is_deterministic_among_case_variants() {
-        let dir = dir_with_files(&[
-            ("t.ogg", b"audio"),
-            ("T.Lrc", b"1"),
-            ("t.lrc", b"2"),
-        ]);
+        let dir = dir_with_files(&[("t.ogg", b"audio"), ("T.Lrc", b"1"), ("t.lrc", b"2")]);
         // Both variants match on a case-insensitive stem; the pick must be
         // stable across calls (sorted, not read_dir order).
         let audio = dir.path().join("t.ogg");

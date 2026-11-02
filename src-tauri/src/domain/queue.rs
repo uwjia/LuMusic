@@ -138,7 +138,9 @@ impl Queue {
 
     /// Id of the current track, if any.
     pub fn current(&self) -> Option<TrackId> {
-        self.current_item_index().and_then(|i| self.items.get(i)).cloned()
+        self.current_item_index()
+            .and_then(|i| self.items.get(i))
+            .cloned()
     }
 
     /// Jumps to an arbitrary index into `items`.

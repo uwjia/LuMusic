@@ -17,7 +17,9 @@ use rodio::Source;
 
 use super::spectrum::SpectrumTap;
 
-use crate::domain::equalizer::{design_bank, db_to_linear, BiquadCoeffs, BiquadState, EqSettings, BAND_COUNT};
+use crate::domain::equalizer::{
+    db_to_linear, design_bank, BiquadCoeffs, BiquadState, EqSettings, BAND_COUNT,
+};
 
 /// EQ state shared between the service (writer) and the audio thread
 /// (reader). Every write bumps `generation` so readers detect the change
@@ -244,10 +246,15 @@ mod tests {
     /// Peak amplitude of the samples above `skip_ratio` (post-settling).
     fn peak_after(samples: &[f32], skip_ratio: f64) -> f32 {
         let skip = (samples.len() as f64 * skip_ratio) as usize;
-        samples[skip..].iter().fold(0.0f32, |acc, s| acc.max(s.abs()))
+        samples[skip..]
+            .iter()
+            .fold(0.0f32, |acc, s| acc.max(s.abs()))
     }
 
-    fn eq_source(bytes: Vec<u8>, shared: Arc<SharedEq>) -> EqualizerSource<impl Source<Item = f32>> {
+    fn eq_source(
+        bytes: Vec<u8>,
+        shared: Arc<SharedEq>,
+    ) -> EqualizerSource<impl Source<Item = f32>> {
         let inner = source_from_bytes(bytes, "test.wav").unwrap();
         EqualizerSource::new(inner, shared)
     }
@@ -264,7 +271,9 @@ mod tests {
             .sanitize(),
         ));
         let bytes = wav_sine(440.0, 0.2);
-        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav").unwrap().collect();
+        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav")
+            .unwrap()
+            .collect();
         let filtered: Vec<f32> = eq_source(bytes, shared).collect();
         assert_eq!(raw.len(), filtered.len());
         assert_eq!(raw, filtered, "bypass must not touch samples");
@@ -274,7 +283,9 @@ mod tests {
     fn enabled_flat_eq_is_bit_exact_pass_through() {
         let shared = Arc::new(SharedEq::new(EqSettings::default()));
         let bytes = wav_sine(440.0, 0.2);
-        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav").unwrap().collect();
+        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav")
+            .unwrap()
+            .collect();
         let filtered: Vec<f32> = eq_source(bytes, shared).collect();
         assert_eq!(raw, filtered, "flat bank is identity by design");
     }
@@ -283,7 +294,9 @@ mod tests {
     fn bass_boost_amplifies_low_frequency_content() {
         let shared = Arc::new(SharedEq::new(EqSettings::default()));
         let bytes = wav_sine(20.0, 0.5);
-        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav").unwrap().collect();
+        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav")
+            .unwrap()
+            .collect();
         let quiet: Vec<f32> = eq_source(bytes.clone(), shared.clone()).collect();
         assert!((peak_after(&raw, 0.5) - peak_after(&quiet, 0.5)).abs() < 1e-3);
 
@@ -349,7 +362,9 @@ mod tests {
             .sanitize(),
         ));
         let bytes = wav_sine(440.0, 0.3);
-        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav").unwrap().collect();
+        let raw: Vec<f32> = source_from_bytes(bytes.clone(), "raw.wav")
+            .unwrap()
+            .collect();
         let filtered: Vec<f32> = eq_source(bytes, shared).collect();
         let ratio = peak_after(&filtered, 0.5) / peak_after(&raw, 0.5);
         // -6 dB ≈ 0.501.

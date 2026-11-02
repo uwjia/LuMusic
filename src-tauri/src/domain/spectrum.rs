@@ -120,7 +120,10 @@ pub fn spectrum_bars(window: &[f32], sample_rate: u32, bars: usize) -> Vec<f32> 
         // narrows below the bin width.
         let low_bin = bin_of(low_hz);
         let high_bin = bin_of(high_hz).max(low_bin + 1).min(half);
-        let peak = mags[low_bin..high_bin].iter().copied().fold(0.0f32, f32::max);
+        let peak = mags[low_bin..high_bin]
+            .iter()
+            .copied()
+            .fold(0.0f32, f32::max);
         let db = 20.0 * (peak + EPS).log10();
         out[bar] = ((db - MIN_DB) / (MAX_DB - MIN_DB)).clamp(0.0, 1.0);
     }
@@ -186,9 +189,7 @@ mod tests {
             .map(|t| (freq * t as f32 * TAU / rate as f32).sin() * 0.5)
             .collect();
         let (re, im) = naive_dft(&input);
-        let mut mags: Vec<f32> = (0..n / 2)
-            .map(|k| re[k].hypot(im[k]))
-            .collect();
+        let mut mags: Vec<f32> = (0..n / 2).map(|k| re[k].hypot(im[k])).collect();
         let peak_bin = mags
             .iter()
             .enumerate()
@@ -211,7 +212,10 @@ mod tests {
 
     #[test]
     fn degenerate_windows_return_zeros_without_panicking() {
-        assert_eq!(spectrum_bars(&[], 44_100, SPECTRUM_BARS), vec![0.0; SPECTRUM_BARS]);
+        assert_eq!(
+            spectrum_bars(&[], 44_100, SPECTRUM_BARS),
+            vec![0.0; SPECTRUM_BARS]
+        );
         assert_eq!(
             spectrum_bars(&[0.5; 1000], 44_100, SPECTRUM_BARS), // not a power of two
             vec![0.0; SPECTRUM_BARS]

@@ -53,7 +53,9 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
         onSort={() => {
           /* playlists keep their own order; header sorting is disabled here */
         }}
-        onPlay={(index) => void usePlayerStore.getState().load(tracks.map((tr) => tr.id), index)}
+        onPlay={(index) =>
+          void usePlayerStore.getState().load(tracks.map((tr) => tr.id), index, playlistId)
+        }
         emptyTitle={t('playlist.empty')}
         emptyHint={t('playlist.emptyHint')}
         rowAction={(track) => (

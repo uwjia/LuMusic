@@ -32,6 +32,9 @@ pub struct PlayerStateDto {
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: RepeatMode,
+    /// Playlist id the queue was loaded from; drives the sidebar's
+    /// per-row playing indicator (survives restarts via the session).
+    pub queue_source_id: Option<String>,
 }
 
 /// Throttled progress tick (event `player://progress`).
@@ -119,6 +122,7 @@ mod tests {
             volume: 0.5,
             shuffle: false,
             repeat: RepeatMode::Off,
+            queue_source_id: None,
         }
     }
 

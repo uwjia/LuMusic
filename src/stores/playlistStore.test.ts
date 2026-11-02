@@ -75,6 +75,32 @@ describe('playlistStore', () => {
     expect(usePlaylistStore.getState().selectedTracks.map((t) => t.id)).toEqual(['a', 'b']);
   });
 
+  it('select ignores a stale reply from a superseded selection', async () => {
+    // All Tracks carries the whole library (slow reply); after two quick
+    // sidebar clicks its late reply must not re-feed the newer playlist's
+    // page — that mismatch made other playlists queue the full library.
+    vi.mocked(api.playlistGetTracks).mockImplementation((id: string) =>
+      id === 'auto:all'
+        ? new Promise((resolve) => setTimeout(() => resolve([track('a'), track('b')]), 20))
+        : Promise.resolve([track('c')]),
+    );
+    const { select } = usePlaylistStore.getState();
+    const slow = select('auto:all');
+    await select('p2');
+    await slow;
+    expect(usePlaylistStore.getState().selectedId).toBe('p2');
+    expect(usePlaylistStore.getState().selectedTracks.map((t) => t.id)).toEqual(['c']);
+  });
+
+  it('load refreshes the selected playlist tracks after a rescan', async () => {
+    usePlaylistStore.setState({ selectedId: 'p1', selectedTracks: [track('a')] });
+    vi.mocked(api.playlistList).mockResolvedValue([playlist('p1', 'Chill', ['b', 'c'])]);
+    vi.mocked(api.playlistGetTracks).mockResolvedValue([track('b'), track('c')]);
+    await usePlaylistStore.getState().load();
+    expect(api.playlistGetTracks).toHaveBeenCalledWith('p1');
+    expect(usePlaylistStore.getState().selectedTracks.map((t) => t.id)).toEqual(['b', 'c']);
+  });
+
   it('select(null) empties the view without an api call', async () => {
     usePlaylistStore.setState({ selectedTracks: [track('a')] });
     await usePlaylistStore.getState().select(null);

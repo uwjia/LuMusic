@@ -11,7 +11,7 @@ pub mod playlist;
 pub mod queue;
 pub mod scan;
 pub mod session;
-pub mod spectrum;
 pub mod settings;
+pub mod spectrum;
 pub mod track;
 pub mod window;

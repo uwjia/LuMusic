@@ -74,7 +74,10 @@ pub async fn scan_library(
         let emit_progress = |count: usize| {
             let _ = app_handle.emit(
                 ev::EVENT_LIBRARY_SCAN_PROGRESS,
-                ScanProgressDto { scanned: count, total },
+                ScanProgressDto {
+                    scanned: count,
+                    total,
+                },
             );
         };
 
@@ -140,16 +143,20 @@ pub fn player_load(
     state: State<'_, SharedService>,
     ids: Vec<TrackId>,
     start_index: Option<usize>,
+    source_playlist_id: Option<String>,
 ) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
-    map(service.play_queue(ids, start_index))?;
+    map(service.play_queue(ids, start_index, source_playlist_id))?;
     let dto = service.state();
     emit_state(&app, &service);
     Ok(dto)
 }
 
 #[tauri::command]
-pub fn player_toggle(app: AppHandle, state: State<'_, SharedService>) -> Result<PlayerStateDto, String> {
+pub fn player_toggle(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     map(service.toggle())?;
     let dto = service.state();
@@ -158,7 +165,10 @@ pub fn player_toggle(app: AppHandle, state: State<'_, SharedService>) -> Result<
 }
 
 #[tauri::command]
-pub fn player_pause(app: AppHandle, state: State<'_, SharedService>) -> Result<PlayerStateDto, String> {
+pub fn player_pause(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     service.pause();
     let dto = service.state();
@@ -167,7 +177,10 @@ pub fn player_pause(app: AppHandle, state: State<'_, SharedService>) -> Result<P
 }
 
 #[tauri::command]
-pub fn player_resume(app: AppHandle, state: State<'_, SharedService>) -> Result<PlayerStateDto, String> {
+pub fn player_resume(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     service.resume();
     let dto = service.state();
@@ -176,7 +189,10 @@ pub fn player_resume(app: AppHandle, state: State<'_, SharedService>) -> Result<
 }
 
 #[tauri::command]
-pub fn player_stop(app: AppHandle, state: State<'_, SharedService>) -> Result<PlayerStateDto, String> {
+pub fn player_stop(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     service.stop();
     let dto = service.state();
@@ -185,7 +201,10 @@ pub fn player_stop(app: AppHandle, state: State<'_, SharedService>) -> Result<Pl
 }
 
 #[tauri::command]
-pub fn player_next(app: AppHandle, state: State<'_, SharedService>) -> Result<PlayerStateDto, String> {
+pub fn player_next(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     map(service.next())?;
     let dto = service.state();
@@ -194,7 +213,10 @@ pub fn player_next(app: AppHandle, state: State<'_, SharedService>) -> Result<Pl
 }
 
 #[tauri::command]
-pub fn player_prev(app: AppHandle, state: State<'_, SharedService>) -> Result<PlayerStateDto, String> {
+pub fn player_prev(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+) -> Result<PlayerStateDto, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     map(service.previous())?;
     let dto = service.state();
@@ -256,10 +278,7 @@ pub fn playlist_list(state: State<'_, SharedService>) -> Result<Vec<Playlist>, S
 }
 
 #[tauri::command]
-pub fn playlist_create(
-    state: State<'_, SharedService>,
-    name: String,
-) -> Result<Playlist, String> {
+pub fn playlist_create(state: State<'_, SharedService>, name: String) -> Result<Playlist, String> {
     let mut service = state.lock().map_err(|_| "service poisoned")?;
     map(service.create_playlist(&name))
 }

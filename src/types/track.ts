@@ -40,6 +40,10 @@ export interface PlayerState {
   volume: number;
   shuffle: boolean;
   repeat: RepeatMode;
+  /** Playlist id the queue was loaded from (sidebar playing indicator);
+   *  persisted in the backend session so it survives restarts. Optional
+   *  because older states/mocks may omit it. */
+  queueSourceId?: string | null;
 }
 
 export interface Playlist {

@@ -46,7 +46,8 @@ export const tauriApi: PlayerApi = {
     }) as Promise<Track[]>,
 
   playerState: () => invoke('player_state'),
-  playerLoad: (ids, startIndex) => invoke('player_load', { ids, startIndex }),
+  playerLoad: (ids, startIndex, sourcePlaylistId) =>
+    invoke('player_load', { ids, startIndex, sourcePlaylistId }),
   playerToggle: () => invoke('player_toggle'),
   playerPause: () => invoke('player_pause'),
   playerResume: () => invoke('player_resume'),

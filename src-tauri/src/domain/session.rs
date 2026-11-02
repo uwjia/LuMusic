@@ -22,6 +22,10 @@ pub struct PlaybackSession {
     pub position_secs: f64,
     pub shuffle: bool,
     pub repeat: RepeatMode,
+    /// Playlist id the queue was loaded from (sidebar playing indicator).
+    /// `None` when playback started outside any playlist (library page);
+    /// purely informational — a stale id simply matches no row.
+    pub queue_source_id: Option<String>,
 }
 
 impl PlaybackSession {
@@ -67,6 +71,7 @@ mod tests {
             position_secs,
             shuffle: false,
             repeat: RepeatMode::Off,
+            queue_source_id: None,
         }
     }
 
@@ -123,10 +128,22 @@ mod tests {
             position_secs: 12.5,
             shuffle: true,
             repeat: RepeatMode::All,
+            queue_source_id: Some("auto:all".into()),
         };
         let json = serde_json::to_string(&s).unwrap();
         assert!(json.contains("\"currentIndex\""));
         assert!(json.contains("\"positionSecs\""));
+        assert!(json.contains("\"queueSourceId\""));
         assert_eq!(serde_json::from_str::<PlaybackSession>(&json).unwrap(), s);
+    }
+
+    #[test]
+    fn sessions_saved_before_the_source_field_deserialize_with_none() {
+        // Old playback.json files predate queueSourceId; serde's struct
+        // default must keep them loadable instead of failing startup.
+        let json =
+            r#"{"queue":["a"],"currentIndex":0,"positionSecs":1.0,"shuffle":false,"repeat":"off"}"#;
+        let s = serde_json::from_str::<PlaybackSession>(json).unwrap();
+        assert_eq!(s.queue_source_id, None);
     }
 }

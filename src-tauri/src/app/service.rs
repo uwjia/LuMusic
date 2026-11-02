@@ -12,7 +12,7 @@ use super::dto::{LyricsDto, PlaybackStatus, PlayerStateDto};
 use crate::domain::equalizer::EqSettings;
 use crate::domain::library::{LibraryIndex, TrackQuery};
 use crate::domain::lyrics;
-use crate::domain::playlist::{PlaylistCollection, PlaylistError, Playlist};
+use crate::domain::playlist::{Playlist, PlaylistCollection, PlaylistError};
 use crate::domain::queue::{AdvanceOutcome, Queue, RepeatMode};
 use crate::domain::scan::ScanSummary;
 use crate::domain::session::PlaybackSession;
@@ -69,6 +69,8 @@ pub struct PlayerService {
     playlists: PlaylistCollection,
     settings: Settings,
     queue: Queue,
+    /// Playlist id the current queue was loaded from (sidebar indicator).
+    queue_source: Option<String>,
     status: PlaybackStatus,
     /// Monotonic counter feeding the shuffle seed so each toggle differs.
     shuffle_seed: u64,
@@ -110,6 +112,7 @@ impl PlayerService {
             playlists,
             settings,
             queue: Queue::new(Vec::new(), None),
+            queue_source: None,
             status: PlaybackStatus::Stopped,
             shuffle_seed: 0,
             session_save_interval: SESSION_SAVE_INTERVAL,
@@ -144,6 +147,7 @@ impl PlayerService {
         let position = session.restore_position(track.duration_secs);
         self.queue = Queue::new(session.queue, Some(session.current_index));
         self.queue.set_repeat(session.repeat);
+        self.queue_source = session.queue_source_id.clone();
         if session.shuffle {
             // Fresh seed: the remaining shuffle order may differ from the
             // last session, but the current track stays first.
@@ -178,6 +182,7 @@ impl PlayerService {
             position_secs: self.engine.position_secs(),
             shuffle: self.queue.shuffle(),
             repeat: self.queue.repeat(),
+            queue_source_id: self.queue_source.clone(),
         };
         if let Err(err) = self.persistence.save_playback(&session) {
             tracing::warn!("failed to persist playback session: {err}");
@@ -213,7 +218,10 @@ impl PlayerService {
             None => return Ok(None),
         };
         let parsed = lyrics::parse_lrc(&found.text);
-        Ok(Some(LyricsDto::from((Some(found.path.display().to_string()), parsed))))
+        Ok(Some(LyricsDto::from((
+            Some(found.path.display().to_string()),
+            parsed,
+        ))))
     }
 
     pub fn library_len(&self) -> usize {
@@ -233,10 +241,7 @@ impl PlayerService {
                 Ok(track) => tracks.push(track),
                 Err(err) => {
                     if warnings.len() < 100 {
-                        warnings.push(format!(
-                            "skipped '{}': {err}",
-                            path.display()
-                        ));
+                        warnings.push(format!("skipped '{}': {err}", path.display()));
                     }
                 }
             }
@@ -318,10 +323,16 @@ impl PlayerService {
     }
 
     /// Replaces the queue with `ids` and starts playing at `start_index`.
-    pub fn play_queue(&mut self, ids: Vec<TrackId>, start_index: Option<usize>) -> Result<(), PlayerError> {
+    pub fn play_queue(
+        &mut self,
+        ids: Vec<TrackId>,
+        start_index: Option<usize>,
+        source_playlist_id: Option<String>,
+    ) -> Result<(), PlayerError> {
         if ids.is_empty() {
             return Err(PlayerError::EmptyQueue);
         }
+        self.queue_source = source_playlist_id;
         self.queue.set_items(ids, start_index);
         let id = self.queue.current().ok_or(PlayerError::EmptyQueue)?;
         self.load_track(&id)
@@ -370,6 +381,7 @@ impl PlayerService {
     pub fn stop(&mut self) {
         self.engine.stop();
         self.status = PlaybackStatus::Stopped;
+        self.queue_source = None;
         // Playback ended for good (user stop or exhausted queue): dropping
         // the session means the next launch starts fresh instead of
         // resurrecting a finished one.
@@ -484,6 +496,7 @@ impl PlayerService {
             volume: self.settings.volume,
             shuffle: self.queue.shuffle(),
             repeat: self.queue.repeat(),
+            queue_source_id: self.queue_source.clone(),
         }
     }
 
@@ -528,7 +541,12 @@ impl PlayerService {
         Ok(())
     }
 
-    pub fn move_track_in_playlist(&mut self, id: &str, from: usize, to: usize) -> Result<(), PlayerError> {
+    pub fn move_track_in_playlist(
+        &mut self,
+        id: &str,
+        from: usize,
+        to: usize,
+    ) -> Result<(), PlayerError> {
         self.playlists.move_track(id, from, to)?;
         self.persist_playlists()?;
         Ok(())
@@ -536,9 +554,12 @@ impl PlayerService {
 
     /// Resolves playlist entries to tracks (missing files are skipped).
     pub fn playlist_tracks(&self, id: &str) -> Option<Vec<Track>> {
-        self.playlists
-            .get(id)
-            .map(|p| p.items.iter().filter_map(|t| self.library.get(t).cloned()).collect())
+        self.playlists.get(id).map(|p| {
+            p.items
+                .iter()
+                .filter_map(|t| self.library.get(t).cloned())
+                .collect()
+        })
     }
 
     fn persist_playlists(&mut self) -> Result<(), PlayerError> {
@@ -650,7 +671,10 @@ mod tests {
     }
 
     impl AudioEngine for MockEngine {
-        fn load_and_play(&mut self, path: &Path) -> Result<(), crate::infra::audio::engine::AudioError> {
+        fn load_and_play(
+            &mut self,
+            path: &Path,
+        ) -> Result<(), crate::infra::audio::engine::AudioError> {
             let mut s = self.state.lock().unwrap();
             s.log.push(format!("open:{}", path.display()));
             s.active = true;
@@ -659,9 +683,14 @@ mod tests {
             s.path = Some(path.to_path_buf());
             Ok(())
         }
-        fn load_paused(&mut self, path: &Path, at_secs: f64) -> Result<(), crate::infra::audio::engine::AudioError> {
+        fn load_paused(
+            &mut self,
+            path: &Path,
+            at_secs: f64,
+        ) -> Result<(), crate::infra::audio::engine::AudioError> {
             let mut s = self.state.lock().unwrap();
-            s.log.push(format!("openPaused:{}@{at_secs:.1}", path.display()));
+            s.log
+                .push(format!("openPaused:{}@{at_secs:.1}", path.display()));
             s.active = true;
             s.paused = true;
             s.position = at_secs;
@@ -691,7 +720,13 @@ mod tests {
         fn set_eq(&mut self, eq: &EqSettings) {
             let mut s = self.state.lock().unwrap();
             s.log.push(if eq.enabled {
-                format!("eq:on:{}", eq.gains_db.first().map(|g| g.to_string()).unwrap_or_default())
+                format!(
+                    "eq:on:{}",
+                    eq.gains_db
+                        .first()
+                        .map(|g| g.to_string())
+                        .unwrap_or_default()
+                )
             } else {
                 "eq:off".to_string()
             });
@@ -726,7 +761,11 @@ mod tests {
     // ---------- helpers ----------
 
     /// Service with two fake tracks (a.mp3, b.mp3) plus engine state handle.
-    fn service_with_tracks() -> (PlayerService, Arc<Mutex<MockEngineState>>, tempfile::TempDir) {
+    fn service_with_tracks() -> (
+        PlayerService,
+        Arc<Mutex<MockEngineState>>,
+        tempfile::TempDir,
+    ) {
         let dir = tempfile::TempDir::new().unwrap();
         let files = vec![PathBuf::from("C:/lib/a.mp3"), PathBuf::from("C:/lib/b.mp3")];
         let engine_state = Arc::new(Mutex::new(MockEngineState::default()));
@@ -750,6 +789,23 @@ mod tests {
 
     fn log_of(state: &Arc<Mutex<MockEngineState>>) -> Vec<String> {
         state.lock().unwrap().log.clone()
+    }
+
+    /// Service re-created from the same data dir (simulates an app restart).
+    fn reloaded_service(dir: &Path) -> PlayerService {
+        PlayerService::new(
+            Box::new(MockEngine {
+                state: Arc::new(Mutex::new(MockEngineState::default())),
+                finish_after_polls: 0,
+            }),
+            Arc::new(MockScanner {
+                files: Mutex::new(vec![]),
+            }),
+            Arc::new(MockMetadata),
+            Arc::new(MockLyricSource::default()),
+            Arc::new(JsonPersistence::new(dir)),
+        )
+        .unwrap()
     }
 
     // ---------- library / persistence ----------
@@ -810,7 +866,11 @@ mod tests {
         assert_eq!(service.state().status, PlaybackStatus::Stopped);
 
         service
-            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0))
+            .play_queue(
+                vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()],
+                Some(0),
+                None,
+            )
             .unwrap();
         assert_eq!(service.state().status, PlaybackStatus::Playing);
         assert_eq!(service.state().current_track.unwrap().id, "C:/lib/a.mp3");
@@ -840,7 +900,7 @@ mod tests {
     fn toggle_from_stopped_replays_queue_head() {
         let (mut service, engine, _dir) = service_with_tracks();
         service
-            .play_queue(vec!["C:/lib/a.mp3".into()], None)
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
             .unwrap();
         service.stop();
         service.toggle().unwrap();
@@ -852,20 +912,17 @@ mod tests {
     fn empty_queue_is_rejected() {
         let (mut service, _engine, _dir) = service_with_tracks();
         assert!(matches!(
-            service.play_queue(vec![], None),
+            service.play_queue(vec![], None, None),
             Err(PlayerError::EmptyQueue)
         ));
-        assert!(matches!(
-            service.toggle(),
-            Err(PlayerError::EmptyQueue)
-        ));
+        assert!(matches!(service.toggle(), Err(PlayerError::EmptyQueue)));
     }
 
     #[test]
     fn missing_track_reports_track_not_found() {
         let (mut service, _engine, _dir) = service_with_tracks();
         assert!(matches!(
-            service.play_queue(vec!["C:/lib/ghost.mp3".into()], None),
+            service.play_queue(vec!["C:/lib/ghost.mp3".into()], None, None),
             Err(PlayerError::TrackNotFound(_))
         ));
     }
@@ -884,7 +941,10 @@ mod tests {
         let mut service = PlayerService::new(
             Box::new(engine),
             Arc::new(MockScanner {
-                files: Mutex::new(vec![PathBuf::from("C:/x/a.mp3"), PathBuf::from("C:/x/b.mp3")]),
+                files: Mutex::new(vec![
+                    PathBuf::from("C:/x/a.mp3"),
+                    PathBuf::from("C:/x/b.mp3"),
+                ]),
             }),
             Arc::new(MockMetadata),
             Arc::new(MockLyricSource::default()),
@@ -893,7 +953,11 @@ mod tests {
         .unwrap();
         service.scan_library(Path::new("C:/x")).unwrap();
         service
-            .play_queue(vec!["C:/x/a.mp3".into(), "C:/x/b.mp3".into()], Some(0))
+            .play_queue(
+                vec!["C:/x/a.mp3".into(), "C:/x/b.mp3".into()],
+                Some(0),
+                None,
+            )
             .unwrap();
 
         // First poll: a.mp3 "finished" -> b.mp3 starts.
@@ -911,13 +975,18 @@ mod tests {
     fn poll_replays_track_with_repeat_one() {
         let (mut service, engine, _dir) = service_with_tracks();
         service.set_repeat(RepeatMode::One);
-        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
+            .unwrap();
         // Simulate end of track.
         engine_set_active(&engine, false);
         assert_eq!(service.poll(), PollOutcome::Advanced);
         assert_eq!(service.state().current_track.unwrap().id, "C:/lib/a.mp3");
         assert_eq!(
-            log_of(&engine).iter().filter(|l| l.starts_with("open")).count(),
+            log_of(&engine)
+                .iter()
+                .filter(|l| l.starts_with("open"))
+                .count(),
             2
         );
     }
@@ -929,7 +998,9 @@ mod tests {
     #[test]
     fn poll_is_noop_when_not_playing() {
         let (mut service, engine, _dir) = service_with_tracks();
-        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
+            .unwrap();
         service.pause();
         engine_set_active(&engine, false);
         assert_eq!(service.poll(), PollOutcome::Unchanged);
@@ -944,7 +1015,10 @@ mod tests {
         assert_eq!(service.state().volume, 1.0);
         assert_eq!(engine.lock().unwrap().volume, 1.0);
         assert_eq!(
-            JsonPersistence::new(dir.path()).load_settings().unwrap().volume,
+            JsonPersistence::new(dir.path())
+                .load_settings()
+                .unwrap()
+                .volume,
             1.0
         );
     }
@@ -952,7 +1026,9 @@ mod tests {
     #[test]
     fn seek_is_clamped_to_duration() {
         let (mut service, engine, _dir) = service_with_tracks();
-        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
+            .unwrap();
         service.seek(99.0).unwrap(); // duration is 10s from MockMetadata
         assert_eq!(log_of(&engine).last().unwrap(), "seek:10.0");
     }
@@ -963,8 +1039,12 @@ mod tests {
     fn playlist_crud_via_service_persists_and_validates() {
         let (mut service, _engine, dir) = service_with_tracks();
         let playlist = service.create_playlist("Chill").unwrap();
-        assert!(service.add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into()).unwrap());
-        assert!(!service.add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into()).unwrap()); // no dupes
+        assert!(service
+            .add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into())
+            .unwrap());
+        assert!(!service
+            .add_track_to_playlist(&playlist.id, "C:/lib/a.mp3".into())
+            .unwrap()); // no dupes
         let tracks = service.playlist_tracks(&playlist.id).unwrap();
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].id, "C:/lib/a.mp3");
@@ -1081,7 +1161,11 @@ mod tests {
         let (mut service, _engine, dir) = service_with_tracks();
         service.set_repeat(RepeatMode::All);
         service
-            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0))
+            .play_queue(
+                vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()],
+                Some(0),
+                None,
+            )
             .unwrap();
         service.seek(4.0).unwrap();
 
@@ -1096,17 +1180,57 @@ mod tests {
     #[test]
     fn stop_clears_persisted_session() {
         let (mut service, _engine, dir) = service_with_tracks();
-        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
+            .unwrap();
         assert!(saved_session(dir.path()).is_some());
         service.stop();
         assert_eq!(saved_session(dir.path()), None);
     }
 
     #[test]
+    fn queue_source_rides_the_session_across_a_restart() {
+        // The sidebar's playing indicator must survive a restart: play
+        // from a playlist, drop the service (process exit), reload from
+        // the persisted session — the restored state still names the
+        // source playlist.
+        let (mut service, _engine, dir) = service_with_tracks();
+        service
+            .play_queue(
+                vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()],
+                Some(0),
+                Some("auto:all".into()),
+            )
+            .unwrap();
+        assert_eq!(service.state().queue_source_id.as_deref(), Some("auto:all"));
+        drop(service);
+
+        let reloaded = reloaded_service(dir.path());
+        assert_eq!(
+            reloaded.state().queue_source_id.as_deref(),
+            Some("auto:all"),
+            "restored session must carry the queue source"
+        );
+
+        // Library playback (no source) clears it; stop clears it too.
+        let mut reloaded = reloaded;
+        reloaded
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
+            .unwrap();
+        assert_eq!(reloaded.state().queue_source_id, None);
+        reloaded.stop();
+        assert_eq!(reloaded.state().queue_source_id, None);
+    }
+
+    #[test]
     fn restart_restores_paused_session_at_last_position() {
         let (mut service, _engine, dir) = service_with_tracks();
         service
-            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0))
+            .play_queue(
+                vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()],
+                Some(0),
+                None,
+            )
             .unwrap();
         service.set_shuffle(true);
         service.seek(4.0).unwrap();
@@ -1152,6 +1276,7 @@ mod tests {
                 position_secs: 3.0,
                 shuffle: false,
                 repeat: RepeatMode::Off,
+                queue_source_id: None,
             })
             .unwrap();
         let (restored, _engine) = reopen(dir.path());
@@ -1171,7 +1296,9 @@ mod tests {
     #[test]
     fn poll_periodically_flushes_live_position() {
         let (mut service, engine, dir) = service_with_tracks();
-        service.play_queue(vec!["C:/lib/a.mp3".into()], None).unwrap();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
+            .unwrap();
         // Simulate the crash case: no seek/pause transition, only time.
         service.session_save_interval = Duration::ZERO;
         engine.lock().unwrap().position = 7.5;
@@ -1211,8 +1338,9 @@ mod tests {
 
     #[test]
     fn lyrics_associate_parse_and_sort_for_a_track() {
-        let service =
-            service_with_lyrics("[offset:500]\n[00:01.00]first\n[02:03.09][00:32.40]late at night\n");
+        let service = service_with_lyrics(
+            "[offset:500]\n[00:01.00]first\n[02:03.09][00:32.40]late at night\n",
+        );
         let lyrics = service.lyrics_for_track("C:/lib/a.mp3").unwrap().unwrap();
         assert_eq!(
             lyrics.source_path.as_deref(),
@@ -1264,7 +1392,7 @@ mod tests {
         // MockEngine uses the trait default: no fabricated frames.
         let (mut service, _engine, _dir) = service_with_tracks();
         service
-            .play_queue(vec!["C:/lib/a.mp3".into()], None)
+            .play_queue(vec!["C:/lib/a.mp3".into()], None, None)
             .unwrap();
         assert_eq!(service.spectrum(), None);
         assert_eq!(service.status(), PlaybackStatus::Playing);

@@ -92,9 +92,11 @@ impl WindowStateSaver {
     pub fn record(&self, window: &WebviewWindow<Wry>) {
         // A failing query (rare) keeps the previous sample: skipping one
         // event is harmless, recording garbage is not.
-        let (Ok(size), Ok(position), Ok(maximized)) =
-            (window.inner_size(), window.outer_position(), window.is_maximized())
-        else {
+        let (Ok(size), Ok(position), Ok(maximized)) = (
+            window.inner_size(),
+            window.outer_position(),
+            window.is_maximized(),
+        ) else {
             return;
         };
         let mut guard = self.tracked.lock().expect("window-state lock");

@@ -65,7 +65,9 @@ impl EqSettings {
         };
         let mut gains_db = Vec::with_capacity(BAND_COUNT);
         for index in 0..BAND_COUNT {
-            gains_db.push(sanitize_gain(self.gains_db.get(index).copied().unwrap_or(0.0)));
+            gains_db.push(sanitize_gain(
+                self.gains_db.get(index).copied().unwrap_or(0.0),
+            ));
         }
         let preamp_db = if self.preamp_db.is_nan() {
             0.0
@@ -260,7 +262,10 @@ mod tests {
             for coeffs in design_bank(44_100, &flat) {
                 y = state.process(&coeffs, y);
             }
-            assert!((y - sample).abs() < 1e-5, "flat bank altered {sample} -> {y}");
+            assert!(
+                (y - sample).abs() < 1e-5,
+                "flat bank altered {sample} -> {y}"
+            );
         }
     }
 

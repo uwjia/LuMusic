@@ -61,8 +61,7 @@ impl PosTracker {
         let sample_rate = self.sample_rate.load(Ordering::Relaxed) as f64;
         let channels = self.channels.load(Ordering::Relaxed).max(1) as u64;
         let frames = (secs.max(0.0) * sample_rate).round() as u64;
-        self.samples
-            .store(frames * channels, Ordering::Relaxed);
+        self.samples.store(frames * channels, Ordering::Relaxed);
     }
 }
 

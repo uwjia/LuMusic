@@ -187,12 +187,16 @@ impl DeviceState {
     }
 
     /// (Re)creates the sink for `path`, optionally starting at `at_secs`.
-    fn open_at(&mut self, path: &Path, at_secs: Option<f64>) -> Result<Arc<PosTracker>, AudioError> {
+    fn open_at(
+        &mut self,
+        path: &Path,
+        at_secs: Option<f64>,
+    ) -> Result<Arc<PosTracker>, AudioError> {
         let file =
             File::open(path).map_err(|_| AudioError::OpenFile(path.display().to_string()))?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut source = SymphoniaSource::new(mss, path.display().to_string())
-            .map_err(AudioError::from)?;
+        let mut source =
+            SymphoniaSource::new(mss, path.display().to_string()).map_err(AudioError::from)?;
         if let Some(secs) = at_secs {
             source.seek_by_time(secs)?;
         }
@@ -277,7 +281,8 @@ impl RodioEngine {
     }
 
     fn query(&self) -> EngineSnapshot {
-        self.call(|reply| Command::Query { reply }).unwrap_or_default()
+        self.call(|reply| Command::Query { reply })
+            .unwrap_or_default()
     }
 
     /// Shared implementation of `load_and_play` / `load_paused`.
@@ -287,7 +292,12 @@ impl RodioEngine {
     /// seek target) instead of the previous track's frozen position. On
     /// error the audio thread kept the old sink playing, so the old
     /// tracker stays — matching what is actually audible.
-    fn open(&self, path: &Path, at_secs: Option<f64>, start_paused: bool) -> Result<(), AudioError> {
+    fn open(
+        &self,
+        path: &Path,
+        at_secs: Option<f64>,
+        start_paused: bool,
+    ) -> Result<(), AudioError> {
         match self.call(|reply| Command::Open {
             path: path.to_path_buf(),
             at_secs,
@@ -310,7 +320,12 @@ impl RodioEngine {
 fn audio_loop(mut state: DeviceState, rx: mpsc::Receiver<Command>) {
     while let Ok(command) = rx.recv() {
         match command {
-            Command::Open { path, at_secs, start_paused, reply } => {
+            Command::Open {
+                path,
+                at_secs,
+                start_paused,
+                reply,
+            } => {
                 let result = state.open_at(&path, at_secs).map(|tracker| {
                     if start_paused {
                         if let Some(sink) = &state.sink {

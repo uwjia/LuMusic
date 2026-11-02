@@ -47,9 +47,16 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
     const playlists = await api.playlistList();
     set({ playlists });
     const { selectedId } = get();
-    if (selectedId && !playlists.some((p) => p.id === selectedId)) {
+    if (!selectedId) return;
+    if (!playlists.some((p) => p.id === selectedId)) {
       set({ selectedId: null, selectedTracks: [] });
+      return;
     }
+    // Scans re-sync the auto playlists (All Tracks, folders); refetch the
+    // open playlist's tracks so its page — and the queue built from it —
+    // never plays a stale list. Same treatment for every playlist.
+    const selectedTracks = await api.playlistGetTracks(selectedId);
+    if (get().selectedId === selectedId) set({ selectedTracks });
   },
 
   select: async (id) => {
@@ -59,7 +66,11 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
       return;
     }
     const selectedTracks = await api.playlistGetTracks(id);
-    set({ selectedTracks });
+    // A late reply must not clobber a newer selection: All Tracks carries
+    // the whole library and is usually the slowest response, so after two
+    // quick sidebar clicks it landed last and silently re-fed the other
+    // playlist's page (and its play queue) the full library.
+    if (get().selectedId === id) set({ selectedTracks });
   },
 
   create: (name) =>
@@ -109,12 +120,13 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
       await get().load();
     }),
 
+  // Track mutations rely on load() refreshing both the playlist list and
+  // the selected playlist's tracks.
   addTrack: (trackId) =>
     guard(set, async () => {
       const { selectedId } = get();
       if (!selectedId) throw new Error('no playlist selected');
       await api.playlistAddTrack(selectedId, trackId);
-      await get().select(selectedId);
       await get().load();
     }),
 
@@ -123,7 +135,6 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
       const { selectedId } = get();
       if (!selectedId) throw new Error('no playlist selected');
       await api.playlistRemoveTrack(selectedId, trackId);
-      await get().select(selectedId);
       await get().load();
     }),
 
@@ -132,7 +143,6 @@ export const usePlaylistStore = create<PlaylistStoreState>((set, get) => ({
       const { selectedId } = get();
       if (!selectedId) throw new Error('no playlist selected');
       await api.playlistMoveTrack(selectedId, from, to);
-      await get().select(selectedId);
       await get().load();
     }),
 }));

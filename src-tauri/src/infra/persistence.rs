@@ -60,14 +60,15 @@ impl JsonPersistence {
         self.dir.join(name)
     }
 
-    fn read_json<T: serde::de::DeserializeOwned>(&self, name: &str) -> Result<Option<T>, PersistenceError> {
+    fn read_json<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &str,
+    ) -> Result<Option<T>, PersistenceError> {
         let path = self.path_for(name);
         match fs::read(&path) {
             Ok(bytes) => {
-                let value = serde_json::from_slice(&bytes).map_err(|source| PersistenceError::Corrupt {
-                    path,
-                    source,
-                })?;
+                let value = serde_json::from_slice(&bytes)
+                    .map_err(|source| PersistenceError::Corrupt { path, source })?;
                 Ok(Some(value))
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -75,7 +76,11 @@ impl JsonPersistence {
         }
     }
 
-    fn write_json<T: serde::Serialize>(&self, name: &str, value: &T) -> Result<(), PersistenceError> {
+    fn write_json<T: serde::Serialize>(
+        &self,
+        name: &str,
+        value: &T,
+    ) -> Result<(), PersistenceError> {
         fs::create_dir_all(&self.dir)?;
         let path = self.path_for(name);
         let tmp = path.with_extension("json.tmp");
@@ -97,7 +102,9 @@ impl Persistence for JsonPersistence {
     }
 
     fn load_playlists(&self) -> Result<PlaylistCollection, PersistenceError> {
-        Ok(self.read_json::<PlaylistCollection>("playlists.json")?.unwrap_or_default())
+        Ok(self
+            .read_json::<PlaylistCollection>("playlists.json")?
+            .unwrap_or_default())
     }
 
     fn save_playlists(&self, playlists: &PlaylistCollection) -> Result<(), PersistenceError> {
@@ -105,7 +112,9 @@ impl Persistence for JsonPersistence {
     }
 
     fn load_settings(&self) -> Result<Settings, PersistenceError> {
-        Ok(self.read_json::<Settings>("settings.json")?.unwrap_or_default())
+        Ok(self
+            .read_json::<Settings>("settings.json")?
+            .unwrap_or_default())
     }
 
     fn save_settings(&self, settings: &Settings) -> Result<(), PersistenceError> {
@@ -203,6 +212,7 @@ mod tests {
             position_secs: 42.5,
             shuffle: true,
             repeat: crate::domain::queue::RepeatMode::All,
+            queue_source_id: Some("auto:all".into()),
         };
         store.save_playback(&session).unwrap();
         assert_eq!(store.load_playback().unwrap(), Some(session));

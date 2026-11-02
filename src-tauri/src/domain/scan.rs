@@ -16,10 +16,7 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "ogg", "oga"];
 /// (case-insensitive).
 pub fn is_audio_file(path: &Path) -> bool {
     path.extension()
-        .map(|ext| {
-            SUPPORTED_EXTENSIONS
-                .contains(&ext.to_string_lossy().to_lowercase().as_str())
-        })
+        .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str()))
         .unwrap_or(false)
 }
 
@@ -170,7 +167,13 @@ mod tests {
                 ("周杰伦", 2, "auto:dir:周杰伦"),
             ]
         );
-        assert_eq!(plan[3].items, vec!["C:/music/周杰伦/晴天.mp3", "C:/music/周杰伦/叶惠美/七里香.mp3"]);
+        assert_eq!(
+            plan[3].items,
+            vec![
+                "C:/music/周杰伦/晴天.mp3",
+                "C:/music/周杰伦/叶惠美/七里香.mp3"
+            ]
+        );
     }
 
     #[test]
@@ -192,6 +195,9 @@ mod tests {
     fn auto_playlist_plan_is_stable_across_calls() {
         let root = Path::new("C:/music");
         let files = [p("C:/music/A/1.mp3"), p("C:/music/A/2.mp3")];
-        assert_eq!(auto_playlist_plan(root, &files), auto_playlist_plan(root, &files));
+        assert_eq!(
+            auto_playlist_plan(root, &files),
+            auto_playlist_plan(root, &files)
+        );
     }
 }

@@ -92,10 +92,15 @@ describe('mock auto playlists', () => {
     const tracks = await mockApi.playlistGetTracks(folder!.id);
     expect(tracks.map((t) => t.title)).toEqual(['Crimson Sky', 'Drift']);
     // Loading those ids yields a playable queue starting at the first track.
-    const state = await mockApi.playerLoad(tracks.map((t) => t.id), 0);
+    const state = await mockApi.playerLoad(tracks.map((t) => t.id), 0, folder!.id);
     expect(state.status).toBe('playing');
     expect(state.currentTrack?.id).toBe(tracks[0].id);
     expect(state.queueLen).toBe(2);
+    // Mirrors the backend: the source playlist rides the state (sidebar
+    // playing indicator), and library playback clears it.
+    expect(state.queueSourceId).toBe(folder!.id);
+    const fromLibrary = await mockApi.playerLoad(tracks.map((t) => t.id));
+    expect(fromLibrary.queueSourceId).toBeNull();
   });
 
   it('repeat modes cycle the queue like the backend', async () => {

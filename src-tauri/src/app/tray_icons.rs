@@ -177,7 +177,9 @@ mod tests {
             // Ink stays inside the canvas with a 1px margin: menu icons must
             // not touch the edge or they look clipped.
             assert!(
-                pixels(glyph).iter().all(|&(x, y)| (0..16).contains(&x) && (0..16).contains(&y)),
+                pixels(glyph)
+                    .iter()
+                    .all(|&(x, y)| (0..16).contains(&x) && (0..16).contains(&y)),
                 "{glyph:?} draws outside the canvas"
             );
         }
@@ -233,12 +235,26 @@ mod tests {
             let pts = pixels(glyph);
             let xs: Vec<i32> = pts.iter().map(|&(x, _)| x).collect();
             let ys: Vec<i32> = pts.iter().map(|&(_, y)| y).collect();
-            (*xs.iter().min().unwrap(), *xs.iter().max().unwrap(), *ys.iter().min().unwrap(), *ys.iter().max().unwrap())
+            (
+                *xs.iter().min().unwrap(),
+                *xs.iter().max().unwrap(),
+                *ys.iter().min().unwrap(),
+                *ys.iter().max().unwrap(),
+            )
         };
-        let expected = [(Glyph::Play, 3, 12), (Glyph::Pause, 4, 11), (Glyph::Next, 3, 13), (Glyph::Previous, 2, 12)];
+        let expected = [
+            (Glyph::Play, 3, 12),
+            (Glyph::Pause, 4, 11),
+            (Glyph::Next, 3, 13),
+            (Glyph::Previous, 2, 12),
+        ];
         for &(glyph, min_x, max_x) in &expected {
             let (x0, x1, y0, y1) = bounds(glyph);
-            assert_eq!((x0, x1, y0, y1), (min_x, max_x, BAND_TOP, BAND_BOTTOM), "{glyph:?} breaks the shared band");
+            assert_eq!(
+                (x0, x1, y0, y1),
+                (min_x, max_x, BAND_TOP, BAND_BOTTOM),
+                "{glyph:?} breaks the shared band"
+            );
         }
     }
 

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { MusicIcon, SettingsIcon } from '@/features/settings/SettingsIcons';
+import { PLAYING_GLYPH, playlistRowIcon } from '@/features/playlists/PlaylistIcons';
 import { usePlaylistStore } from '@/stores/playlistStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useTranslation } from '@/i18n';
@@ -22,7 +23,12 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
   const playlists = usePlaylistStore((s) => s.playlists);
   const error = usePlaylistStore((s) => s.error);
   const { create, select, rename, duplicate, remove } = usePlaylistStore.getState();
-  const currentTrackId = usePlayerStore((s) => s.state?.currentTrack?.id ?? null);
+  // Precise playing indicator: only the playlist the queue was loaded
+  // from lights up. "Contains the current track" would permanently swap
+  // All Tracks' dedicated icon for the speaker (it contains everything)
+  // and light up Default / the source folder at the same time. The source
+  // rides the backend session, so it survives app restarts.
+  const queueSourceId = usePlayerStore((s) => s.state?.queueSourceId ?? null);
   const { t } = useTranslation();
 
   const [newName, setNewName] = useState('');
@@ -114,7 +120,8 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
         <div className="sidebar-heading">{t('nav.playlists')}</div>
         <ul className="playlist-list">
           {playlists.map((playlist) => {
-            const playingHere = playlist.items.includes(currentTrackId ?? '');
+            const playingHere = queueSourceId === playlist.id;
+            const RowIcon = playlistRowIcon(playlist);
             return (
               <li key={playlist.id}>
                 {renamingId === playlist.id ? (
@@ -152,7 +159,9 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
                       setMenu({ id: playlist.id, x: e.clientX, y: e.clientY });
                     }}
                   >
-                    {playingHere ? '🔊 ' : '🗎 '}
+                    {/* The colored speaker emoji outranks the type glyph:
+                        "playing here" is the louder signal. */}
+                    {playingHere ? PLAYING_GLYPH : <RowIcon />}
                     <span className="nav-label">{displayPlaylistName(playlist, t)}</span>
                     <span className="muted count">{playlist.items.length}</span>
                   </button>

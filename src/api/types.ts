@@ -28,7 +28,7 @@ export interface PlayerApi {
 
   // playback (each control returns the resulting state)
   playerState(): Promise<PlayerState>;
-  playerLoad(ids: TrackId[], startIndex?: number): Promise<PlayerState>;
+  playerLoad(ids: TrackId[], startIndex?: number, sourcePlaylistId?: string): Promise<PlayerState>;
   playerToggle(): Promise<PlayerState>;
   playerPause(): Promise<PlayerState>;
   playerResume(): Promise<PlayerState>;
