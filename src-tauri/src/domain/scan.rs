@@ -36,6 +36,35 @@ pub fn is_audio_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// True when `child` is `dir` itself or lives underneath it. Component
+/// comparison with component boundaries (so `Music` never matches
+/// `Music2`); lowercased because Windows filesystems are case-insensitive
+/// and watcher/scan paths can differ in case (on case-sensitive systems
+/// the lowering can only over-match pathologically-cased siblings).
+pub fn path_is_at_or_under(child: &Path, dir: &Path) -> bool {
+    let mut child = child.components();
+    let mut dir = dir.components();
+    loop {
+        match (child.next(), dir.next()) {
+            (Some(c), Some(d)) => {
+                if !c
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&d.as_os_str().to_string_lossy())
+                {
+                    return false;
+                }
+            }
+            // Equal paths.
+            (None, None) => return true,
+            // `child` is shorter than `dir`: not underneath it.
+            (None, Some(_)) => return false,
+            // `dir` exhausted: strict prefix.
+            (Some(_), None) => return true,
+        }
+    }
+}
+
 /// Collects the (lowercased) extension of a path for reporting.
 pub fn extension_of(path: &Path) -> String {
     path.extension()
@@ -230,6 +259,21 @@ mod tests {
     fn extension_of_lowercases_and_defaults_to_empty() {
         assert_eq!(extension_of(Path::new("X.MP3")), "mp3");
         assert_eq!(extension_of(Path::new("noext")), "");
+    }
+
+    #[test]
+    fn path_is_at_or_under_matches_prefixes_with_component_boundaries() {
+        let under = |child: &str, dir: &str| path_is_at_or_under(Path::new(child), Path::new(dir));
+        assert!(under("C:/music/a.mp3", "C:/music"));
+        assert!(under("C:/music/Rock/x.mp3", "C:/music"));
+        assert!(under("C:/music", "C:/music")); // the dir itself
+        // Case-insensitive (watcher vs scan paths may differ in case).
+        assert!(under("C:/MUSIC/a.mp3", "c:/Music"));
+        // Component boundaries: a sibling sharing a prefix must not match.
+        assert!(!under("C:/music2/a.mp3", "C:/music"));
+        assert!(!under("C:/other/a.mp3", "C:/music"));
+        // A longer "child" than the dir cannot be under it.
+        assert!(!under("C:/music", "C:/music/Rock"));
     }
 
     #[test]

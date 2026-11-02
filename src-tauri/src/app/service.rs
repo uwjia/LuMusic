@@ -321,6 +321,37 @@ impl PlayerService {
         summary
     }
 
+    /// Incremental merge of filesystem changes detected by the folder
+    /// watcher: upserts freshly-read tracks, drops ids that vanished from
+    /// disk (exact paths, or anything under a removed directory), then
+    /// runs the regular scan merge (auto-playlist resync + persistence)
+    /// over the reconstructed current list. Same lock profile as
+    /// `apply_scan` — all heavy IO must have happened before this call.
+    pub fn merge_fs_changes(
+        &mut self,
+        refreshed: Vec<Track>,
+        removed: &[PathBuf],
+        warnings: Vec<String>,
+    ) -> ScanSummary {
+        let root = self.settings.last_folder.clone().unwrap_or_default();
+        let mut tracks: Vec<Track> = self.query_tracks(&TrackQuery::default());
+        if !removed.is_empty() {
+            tracks.retain(|track| {
+                !removed
+                    .iter()
+                    .any(|gone| crate::domain::scan::path_is_at_or_under(Path::new(&track.file_path), gone))
+            });
+        }
+        for track in refreshed {
+            match tracks.iter_mut().find(|existing| existing.id == track.id) {
+                Some(slot) => *slot = track,
+                None => tracks.push(track),
+            }
+        }
+        let files_seen = tracks.len();
+        self.apply_scan(&PathBuf::from(root), files_seen, tracks, warnings)
+    }
+
     /// Drag-and-drop import: reads metadata for the dropped files (run
     /// outside the service lock by the command, like the scan's phase 1).
     /// Non-audio and unreadable files are skipped with a warning — a drop

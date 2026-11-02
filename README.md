@@ -14,6 +14,11 @@ strictly layered architecture and tests accompanying every behavior.
   (MP3 / FLAC / WAV / OGG / M4A (AAC/ALAC) / AIFF / APE (Monkey's Audio
   3.95+); raw ADTS `.aac` and the video `.mp4` container are deliberately
   not scanned)
+- Library folder watching (`notify`): new files appear, renames/moves and
+  deletes prune dead entries, and tag edits refresh — all merged silently
+  in debounced batches (IO outside the service lock; auto playlists
+  resync with each merge; the UI refreshes through the existing
+  `library://updated` event)
 - Automatic mojibake repair: legacy GBK/Big5/Shift-JIS tags misread as Latin-1
   (e.g. `ÄãºÃ` -> `你好`) are fixed with a high-confidence heuristic
   (`domain/encoding.rs`, Western titles are never rewritten)

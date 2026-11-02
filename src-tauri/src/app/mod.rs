@@ -7,4 +7,5 @@ pub mod service;
 pub mod state;
 pub mod tray;
 pub mod tray_icons;
+pub mod watch;
 pub mod window_state;

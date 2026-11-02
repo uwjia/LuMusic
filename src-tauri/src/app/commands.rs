@@ -69,9 +69,12 @@ pub async fn scan_library(
     let service = state.inner().clone();
     let app_handle = app.clone();
     let root_path = PathBuf::from(root);
+    // The blocking closure owns its copy; `root_path` stays for the
+    // watcher retarget below.
+    let scan_root = root_path.clone();
 
     let summary = tauri::async_runtime::spawn_blocking(move || -> Result<ScanSummary, String> {
-        let scanned = scanner.scan(&root_path);
+        let scanned = scanner.scan(&scan_root);
         let total = scanned.files.len();
         let emit_progress = |count: usize| {
             let _ = app_handle.emit(
@@ -101,12 +104,17 @@ pub async fn scan_library(
         emit_progress(total);
 
         let mut service = service.lock().map_err(|_| "service poisoned".to_string())?;
-        Ok(service.apply_scan(&root_path, total, tracks, warnings))
+        Ok(service.apply_scan(&scan_root, total, tracks, warnings))
     })
     .await
     .map_err(|e| e.to_string())??;
 
     let _ = app.emit(ev::EVENT_LIBRARY_UPDATED, &summary);
+    // The scan defines what "the library folder" means: retarget the
+    // watcher so subsequent disk changes merge silently.
+    if let Some(watch) = app.try_state::<super::watch::LibraryWatch>() {
+        watch.set_root(&root_path);
+    }
     Ok(summary)
 }
 

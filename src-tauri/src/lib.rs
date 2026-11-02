@@ -13,6 +13,7 @@ pub mod domain;
 pub mod events;
 pub mod infra;
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,7 @@ use app::dto::ProgressDto;
 use app::service::PollOutcome;
 use app::state::SharedService;
 use app::tray::{self, TrayController, TrayLabels};
+use domain::scan::ScanSummary;
 use events as ev;
 
 /// Boots the Tauri application: state, tray, command handlers, poller thread.
@@ -124,6 +126,39 @@ pub fn run() {
                 .state();
             let media = app::media::MediaController::build(app.handle(), hwnd, &initial_state);
             app.manage(Mutex::new(media));
+
+            // Library folder watcher: silent incremental merges (adds,
+            // renames/moves, deletes) so the library never keeps dead
+            // entries and new files appear without a manual rescan.
+            // Seeded from the restored last folder; every later scan
+            // switches the watched root.
+            let watch = {
+                let metadata = poller_service
+                    .lock()
+                    .expect("fresh service is not poisoned")
+                    .adapters()
+                    .1;
+                let emit_app: tauri::AppHandle<Wry> = app.handle().clone();
+                let emitter: std::sync::Arc<dyn Fn(&ScanSummary) + Send + Sync> =
+                    std::sync::Arc::new(move |summary: &ScanSummary| {
+                        // The existing event already reloads the library
+                        // and playlists in the frontend (usePlayerEvents).
+                        let _ = emit_app.emit(ev::EVENT_LIBRARY_UPDATED, summary);
+                    });
+                app::watch::LibraryWatch::start(metadata, poller_service.clone(), emitter)
+            };
+            if let Some(folder) = poller_service
+                .lock()
+                .expect("fresh service is not poisoned")
+                .settings()
+                .last_folder
+            {
+                let folder = PathBuf::from(&folder);
+                if folder.is_dir() {
+                    watch.set_root(&folder);
+                }
+            }
+            app.manage(watch);
 
             let poller_app: tauri::AppHandle<Wry> = app.handle().clone();
             std::thread::Builder::new()

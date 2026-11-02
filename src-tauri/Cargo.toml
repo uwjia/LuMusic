@@ -29,6 +29,9 @@ souvlaki = "0.9"
 # decoder — streaming frames, sample-accurate seek, byte-verified against
 # the C++ reference, only two tiny deps (crc32fast, md-5).
 ape-decoder = "0.3"
+# Library folder watching: the de-facto filesystem event adapter
+# (ReadDirectoryChangesW / inotify / FSEvents behind one API).
+notify = "8"
 symphonia = { version = "0.5", default-features = false, features = [
     "mp3",
     "flac",
