@@ -143,6 +143,10 @@ impl From<SourceError> for AudioError {
 /// by mocks in service tests.
 pub trait AudioEngine: Send {
     /// Opens `path` and starts playing it immediately from the start.
+    /// When another track is actively sounding, the rodio engine first
+    /// fades it out and swaps only once the ramp has drained (~0.2 s;
+    /// the caller blocks through it — dropping the old sink at full gain
+    /// would pop).
     fn load_and_play(&mut self, path: &Path) -> Result<(), AudioError>;
     /// Opens `path` positioned at `at_secs` **without starting playback**
     /// (session restore). Pressing play afterwards continues from `at_secs`.
@@ -197,6 +201,12 @@ enum Command {
     /// The actual sink pause, sent by the deferred-pause timer once the
     /// fade-out has drained. Never user-issued.
     PauseNow,
+    /// The deferred half of a fading track switch: sent by the timer once
+    /// the old track's fade-out has drained, carrying the generation of
+    /// the [`Command::Open`] it serves. Never user-issued.
+    OpenNow {
+        generation: u64,
+    },
     Resume,
     Stop {
         reply: Reply<()>,
@@ -282,10 +292,60 @@ struct DeviceState {
     /// Gain ramp read by every appended `FadeSource`; like the EQ it
     /// outlives sinks so the ramp survives seeks (which reopen sources).
     fade: Arc<SharedFade>,
-    /// Deferred-pause cancellation token: bumped by every command that
-    /// invalidates an in-flight fade-out (resume/open/stop/seek), so the
-    /// timer thread can drop a stale `PauseNow`.
-    pause_generation: Arc<AtomicU64>,
+    /// Cancellation token for deferred follow-ups (`PauseNow`,
+    /// `OpenNow`): bumped by every command that invalidates an in-flight
+    /// fade-out, so the timer threads can drop stale commands.
+    command_generation: Arc<AtomicU64>,
+}
+
+/// A track switch parked until the outgoing track's fade-out has drained.
+struct PendingOpen {
+    path: PathBuf,
+    at_secs: Option<f64>,
+    start_paused: bool,
+    reply: Reply<Result<Arc<PosTracker>, AudioError>>,
+}
+
+/// Extra slack added to a fade before its deferred follow-up fires. The
+/// fade is complete once the audio callback has *pulled* it — with a
+/// large callback chunk (tens of ms on some device configs) a 120 ms ramp
+/// finishes pulling up to one chunk late, and pausing/swapping mid-ramp
+/// truncates the tail into an audible step.
+const DEFER_MARGIN: Duration = Duration::from_millis(100);
+
+/// Arms the deferred follow-up of a fade-out: sleeps past the fade (plus
+/// [`DEFER_MARGIN`]), then sends `make()` unless the generation moved on.
+fn arm_deferred(
+    tx: &Sender<Command>,
+    token: Arc<AtomicU64>,
+    generation: u64,
+    make: impl FnOnce() -> Command + Send + 'static,
+) {
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs_f64(FADE_SECS) + DEFER_MARGIN);
+        if token.load(Ordering::SeqCst) == generation {
+            let _ = tx.send(make());
+        }
+    });
+}
+
+/// Opens `path` as the new sink (fade-in), honoring `start_paused`.
+fn open_source(
+    state: &mut DeviceState,
+    path: &Path,
+    at_secs: Option<f64>,
+    start_paused: bool,
+) -> Result<Arc<PosTracker>, AudioError> {
+    state.open_at(path, at_secs, true).map(|tracker| {
+        if start_paused {
+            if let Some(sink) = &state.sink {
+                sink.pause();
+            }
+            state.paused = true;
+        }
+        tracker
+    })
 }
 
 impl DeviceState {
@@ -361,8 +421,8 @@ impl RodioEngine {
         let thread_tap = tap.clone();
         let fade = Arc::new(SharedFade::new());
         let thread_fade = fade.clone();
-        let pause_generation = Arc::new(AtomicU64::new(0));
-        let thread_generation = pause_generation.clone();
+        let command_generation = Arc::new(AtomicU64::new(0));
+        let thread_generation = command_generation.clone();
         let thread_tx = tx.clone();
         std::thread::Builder::new()
             .name("lumusic-audio".into())
@@ -385,7 +445,7 @@ impl RodioEngine {
                     eq: thread_eq,
                     spectrum_tap: thread_tap,
                     fade: thread_fade,
-                    pause_generation: thread_generation,
+                    command_generation: thread_generation,
                 };
                 let _ = init_tx.send(Ok(()));
                 audio_loop(state, thread_tx, rx);
@@ -411,6 +471,10 @@ impl RodioEngine {
     }
 
     /// Shared implementation of `load_and_play` / `load_paused`.
+    ///
+    /// May block for one fade window when a sounding sink is replaced
+    /// (the audio thread parks the open until the old track's fade-out
+    /// has drained, then replies — see `Command::Open`).
     ///
     /// On success the fresh tracker is adopted *before* returning, so the
     /// caller's immediate `position_secs()` read already sees 0.0 (or the
@@ -442,7 +506,18 @@ impl RodioEngine {
 /// Command loop running on the audio thread. Every reply already carries
 /// the resulting state (tracker / snapshot), so the loop keeps no shared
 /// side channel — nothing here can be observed stale by a caller.
+///
+/// Concurrency note: every engine command originates from the
+/// `PlayerService` mutex, so while a *deferred* switch parks a caller
+/// (waiting for its reply) no other command can interleave — only timer
+/// follow-ups (`PauseNow`/`OpenNow`) can, and the generation token makes
+/// stale ones inert. The supersession replies below are defensive paths
+/// for any future caller that does not hold the service lock.
 fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Command>) {
+    // Parked switch (fading out the old track) and its fallback reply.
+    let mut pending_open: Option<PendingOpen> = None;
+    let mut last_tracker: Option<Arc<PosTracker>> = None;
+
     while let Ok(command) = rx.recv() {
         match command {
             Command::Open {
@@ -453,35 +528,73 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
             } => {
                 // A new source invalidates any in-flight deferred pause: a
                 // stale PauseNow must never mute the freshly opened track.
-                state.pause_generation.fetch_add(1, Ordering::SeqCst);
-                let result = state.open_at(&path, at_secs, true).map(|tracker| {
-                    if start_paused {
-                        if let Some(sink) = &state.sink {
-                            sink.pause();
-                        }
-                        state.paused = true;
+                state.command_generation.fetch_add(1, Ordering::SeqCst);
+
+                // Fading switch: dropping the old sink mid-waveform at full
+                // gain is a step discontinuity — the pop on next/previous.
+                // When the old sink is actively sounding, ramp it down and
+                // swap once the ramp has drained. Idle switches (nothing
+                // loaded, old sink paused or already drained to silence)
+                // have nothing audible to cut and swap immediately.
+                let old_sounding = !start_paused
+                    && state
+                        .sink
+                        .as_ref()
+                        .map(|sink| !sink.empty() && !state.paused)
+                        .unwrap_or(false);
+                if old_sounding {
+                    state.fade.fade_out();
+                    let generation = state.command_generation.load(Ordering::SeqCst);
+                    arm_deferred(
+                        &tx,
+                        state.command_generation.clone(),
+                        generation,
+                        move || Command::OpenNow { generation },
+                    );
+                    pending_open = Some(PendingOpen {
+                        path,
+                        at_secs,
+                        start_paused,
+                        reply,
+                    });
+                } else {
+                    let result = open_source(&mut state, &path, at_secs, start_paused);
+                    if let Ok(tracker) = &result {
+                        last_tracker = Some(tracker.clone());
                     }
-                    tracker
-                });
-                let _ = reply.send(result);
+                    let _ = reply.send(result);
+                }
+            }
+            Command::OpenNow { generation } => {
+                if generation == state.command_generation.load(Ordering::SeqCst) {
+                    if let Some(pending) = pending_open.take() {
+                        let result =
+                            open_source(&mut state, &pending.path, pending.at_secs, pending.start_paused);
+                        if let Ok(tracker) = &result {
+                            last_tracker = Some(tracker.clone());
+                        }
+                        let _ = pending.reply.send(result);
+                    }
+                } else if let Some(pending) = pending_open.take() {
+                    // Superseded (unreachable under the service lock; see
+                    // the loop's concurrency note). Release the caller with
+                    // the current tracker so it can never hang.
+                    let fallback = last_tracker.clone().ok_or(AudioError::NoDevice);
+                    let _ = pending.reply.send(fallback);
+                }
             }
             Command::Pause => {
                 if state.sink.is_some() {
                     // Instant pausing while samples are at full gain clicks;
                     // ramp down first and pause once the ramp has drained.
                     state.fade.fade_out();
-                    let generation = state.pause_generation.fetch_add(1, Ordering::SeqCst) + 1;
-                    let token = state.pause_generation.clone();
-                    let deferred_pause = tx.clone();
-                    std::thread::spawn(move || {
-                        // The ramp covers FADE_SECS of audio; the margin
-                        // absorbs scheduler jitter so the sink pauses only
-                        // after silence, never mid-tail.
-                        std::thread::sleep(Duration::from_secs_f64(FADE_SECS) + Duration::from_millis(30));
-                        if token.load(Ordering::SeqCst) == generation {
-                            let _ = deferred_pause.send(Command::PauseNow);
-                        }
-                    });
+                    let generation = state.command_generation.fetch_add(1, Ordering::SeqCst) + 1;
+                    arm_deferred(
+                        &tx,
+                        state.command_generation.clone(),
+                        generation,
+                        || Command::PauseNow,
+                    );
                 }
             }
             Command::PauseNow => {
@@ -494,7 +607,7 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
                 // Cancels a pending deferred pause (the generation bump
                 // makes the timer thread drop its PauseNow) and ramps the
                 // gain back up from wherever the fade-out stopped.
-                state.pause_generation.fetch_add(1, Ordering::SeqCst);
+                state.command_generation.fetch_add(1, Ordering::SeqCst);
                 if let Some(sink) = &state.sink {
                     state.fade.fade_in();
                     sink.play();
@@ -502,7 +615,11 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
                 }
             }
             Command::Stop { reply } => {
-                state.pause_generation.fetch_add(1, Ordering::SeqCst);
+                state.command_generation.fetch_add(1, Ordering::SeqCst);
+                if let Some(pending) = pending_open.take() {
+                    // Defensive supersession release (see loop docs).
+                    let _ = pending.reply.send(Err(AudioError::NoDevice));
+                }
                 state.sink = None; // dropping stops playback
                 state.path = None;
                 state.paused = false;
@@ -520,7 +637,11 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
                 state.eq.set(eq);
             }
             Command::Seek { secs, reply } => {
-                state.pause_generation.fetch_add(1, Ordering::SeqCst);
+                state.command_generation.fetch_add(1, Ordering::SeqCst);
+                if let Some(pending) = pending_open.take() {
+                    // Defensive supersession release (see loop docs).
+                    let _ = pending.reply.send(Err(AudioError::NoDevice));
+                }
                 let result = match state.path.clone() {
                     // Reopening is the seek: a new source positioned at
                     // `secs`, wrapped in a fresh sink (EQ/spectrum intact).
@@ -529,6 +650,9 @@ fn audio_loop(mut state: DeviceState, tx: Sender<Command>, rx: mpsc::Receiver<Co
                     Some(path) => state.open_at(&path, Some(secs), false).map(Some),
                     None => Ok(None), // nothing loaded: seek is a no-op
                 };
+                if let Ok(Some(tracker)) = &result {
+                    last_tracker = Some(tracker.clone());
+                }
                 let _ = reply.send(result);
             }
             Command::Query { reply } => {

@@ -6,12 +6,12 @@
 //! polling it from a timer clicks if frames land late. A per-sample ramp
 //! in the source is sample-accurate and lock-free.
 //!
-//! Scope: fade-in on every new source (track start, resume) and fade-out
-//! on pause. Source *replacements* (next/previous/seek/stop) drop the old
-//! sink immediately — fading them would mean deferring the switch, which
-//! holds the service lock for the fade duration (every UI command stalls
-//! behind it). The fade-in on the new track still removes the abrupt
-//! blast; true crossfading is the separate gapless non-goal.
+//! Scope: fade-in on every new source (track start, resume), fade-out on
+//! pause **and on track switches** (the engine defers the sink swap until
+//! the fade-out has drained — dropping the old sink mid-waveform at full
+//! gain is a step discontinuity, i.e. the pop on next/previous). Seeks
+//! reopen the source without fading (instant feedback, gain continuity);
+//! true crossfading is the separate gapless non-goal.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
