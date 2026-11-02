@@ -27,7 +27,7 @@ import type {
 import { SPECTRUM_BARS } from '@/types/track';
 
 // Mirrors domain::scan::SUPPORTED_EXTENSIONS — the import's format filter.
-const SUPPORTED_EXTENSIONS = ['mp3', 'flac', 'wav', 'ogg', 'oga', 'm4a', 'aif', 'aiff'];
+const SUPPORTED_EXTENSIONS = ['mp3', 'flac', 'wav', 'ogg', 'oga', 'm4a', 'aif', 'aiff', 'ape'];
 
 const TRACKS_ROOT = 'C:/mock-music';
 

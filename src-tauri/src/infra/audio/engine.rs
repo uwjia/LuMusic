@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 
+use super::ape_source::{ApeDecoderStream, ApeSource};
 use super::equalizer::{EqualizerSource, SharedEq};
 use super::fade::{FadeSource, SharedFade, FADE_SECS};
 use super::spectrum::{SpectrumAnalyzer, SpectrumTap};
@@ -21,6 +22,101 @@ use super::symphonia_source::{PosTracker, SourceError, SymphoniaSource};
 use crate::domain::equalizer::EqSettings;
 use crate::domain::spectrum::FFT_SIZE;
 use symphonia::core::io::MediaSourceStream;
+
+/// True for files the APE adapter owns (symphonia has no APE codec).
+/// Case-insensitive, mirroring `domain::scan::is_audio_file`.
+fn is_ape_path(path: &Path) -> bool {
+    path.extension()
+        .map(|ext| ext.to_string_lossy().eq_ignore_ascii_case("ape"))
+        .unwrap_or(false)
+}
+
+/// One decoded stream, whatever the format. An enum (not a trait object)
+/// keeps the sources concrete — the EQ/fade wrappers stay monomorphized
+/// and `Send` is checked per variant.
+enum DecodedSource {
+    Symphonia(SymphoniaSource),
+    Ape(ApeSource<ApeDecoderStream>),
+}
+
+impl DecodedSource {
+    /// Opens `path` with the decoder its extension maps to.
+    fn open(path: &Path) -> Result<Self, AudioError> {
+        if is_ape_path(path) {
+            Ok(DecodedSource::Ape(ApeSource::new(ApeDecoderStream::open(path)?)))
+        } else {
+            let file =
+                File::open(path).map_err(|_| AudioError::OpenFile(path.display().to_string()))?;
+            let mss = MediaSourceStream::new(Box::new(file), Default::default());
+            let source = SymphoniaSource::new(mss, path.display().to_string())
+                .map_err(AudioError::from)?;
+            Ok(DecodedSource::Symphonia(source))
+        }
+    }
+
+    fn seek_by_time(&mut self, secs: f64) -> Result<(), AudioError> {
+        match self {
+            DecodedSource::Symphonia(source) => source.seek_by_time(secs).map_err(AudioError::from),
+            DecodedSource::Ape(source) => source.seek_by_time(secs),
+        }
+    }
+
+    fn position_tracker(&self) -> Arc<PosTracker> {
+        match self {
+            DecodedSource::Symphonia(source) => source.position_tracker(),
+            DecodedSource::Ape(source) => source.position_tracker(),
+        }
+    }
+
+    fn sample_rate(&self) -> u32 {
+        match self {
+            DecodedSource::Symphonia(source) => source.sample_rate(),
+            DecodedSource::Ape(source) => source.sample_rate(),
+        }
+    }
+}
+
+impl Iterator for DecodedSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        match self {
+            DecodedSource::Symphonia(source) => source.next(),
+            DecodedSource::Ape(source) => source.next(),
+        }
+    }
+}
+
+impl rodio::Source for DecodedSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        match self {
+            DecodedSource::Symphonia(source) => source.current_frame_len(),
+            DecodedSource::Ape(source) => source.current_frame_len(),
+        }
+    }
+
+    fn channels(&self) -> u16 {
+        match self {
+            // Trait call: SymphoniaSource's inherent channels() returns u32.
+            DecodedSource::Symphonia(source) => rodio::Source::channels(source),
+            DecodedSource::Ape(source) => rodio::Source::channels(source),
+        }
+    }
+
+    fn sample_rate(&self) -> u32 {
+        match self {
+            DecodedSource::Symphonia(source) => source.sample_rate(),
+            DecodedSource::Ape(source) => source.sample_rate(),
+        }
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        match self {
+            DecodedSource::Symphonia(source) => source.total_duration(),
+            DecodedSource::Ape(source) => source.total_duration(),
+        }
+    }
+}
 
 /// Engine-level errors.
 #[derive(Debug, thiserror::Error)]
@@ -214,11 +310,7 @@ impl DeviceState {
         at_secs: Option<f64>,
         fade_in: bool,
     ) -> Result<Arc<PosTracker>, AudioError> {
-        let file =
-            File::open(path).map_err(|_| AudioError::OpenFile(path.display().to_string()))?;
-        let mss = MediaSourceStream::new(Box::new(file), Default::default());
-        let mut source =
-            SymphoniaSource::new(mss, path.display().to_string()).map_err(AudioError::from)?;
+        let mut source = DecodedSource::open(path)?;
         if let Some(secs) = at_secs {
             source.seek_by_time(secs)?;
         }
@@ -663,6 +755,20 @@ mod tests {
     fn audio_error_converts_from_source_error() {
         let err = AudioError::from(SourceError::NoTrack("x.mp3".into()));
         assert!(err.to_string().contains("x.mp3"));
+    }
+
+    /// Only the APE adapter owns `.ape` — everything else goes through the
+    /// symphonia probe (symphonia has no APE codec). Case-insensitive like
+    /// `domain::scan::is_audio_file`, so `Album.APE` from macOS rips scans
+    /// and plays identically.
+    #[test]
+    fn ape_dispatch_matches_extension_case_insensitively() {
+        for name in ["a.ape", "b.APE", "c.Ape"] {
+            assert!(is_ape_path(Path::new(name)), "{name} must dispatch to the APE adapter");
+        }
+        for name in ["a.mp3", "b.m4a", "ape", "a.apefile", "noext"] {
+            assert!(!is_ape_path(Path::new(name)), "{name} must stay on the symphonia path");
+        }
     }
 
     #[test]

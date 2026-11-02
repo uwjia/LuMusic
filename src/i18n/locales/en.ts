@@ -199,7 +199,7 @@ export const en = {
     'Keep playing in the background when the window is closed. Restore it with the tray icon, or exit via Quit.',
   'settings.about': 'About',
   'settings.aboutText':
-    'Supported formats: MP3, FLAC, WAV, OGG, M4A (AAC/ALAC), AIFF. Settings and the library cache live in the app data directory.',
+    'Supported formats: MP3, FLAC, WAV, OGG, M4A (AAC/ALAC), AIFF, APE. Settings and the library cache live in the app data directory.',
 } as const;
 
 export type MessageKey = keyof typeof en;

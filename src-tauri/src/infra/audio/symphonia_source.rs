@@ -26,13 +26,15 @@ use symphonia::core::units::{Time, TimeBase};
 /// thread reads the position concurrently.
 #[derive(Debug)]
 pub struct PosTracker {
-    samples: AtomicU64,
+    /// `pub(crate)`: the APE adapter feeds the same interleaved-sample
+    /// counter from its own decode loop.
+    pub(crate) samples: AtomicU64,
     sample_rate: AtomicU32,
     channels: AtomicU32,
 }
 
 impl PosTracker {
-    fn new(sample_rate: u32, channels: u32) -> Self {
+    pub(crate) fn new(sample_rate: u32, channels: u32) -> Self {
         Self {
             samples: AtomicU64::new(0),
             sample_rate: AtomicU32::new(sample_rate),
@@ -57,7 +59,8 @@ impl PosTracker {
         frames as f64 / sample_rate as f64
     }
 
-    fn set_position_secs(&self, secs: f64) {
+    /// Shared with `ape_source` (same immediate-observation contract).
+    pub(crate) fn set_position_secs(&self, secs: f64) {
         let sample_rate = self.sample_rate.load(Ordering::Relaxed) as f64;
         let channels = self.channels.load(Ordering::Relaxed).max(1) as u64;
         let frames = (secs.max(0.0) * sample_rate).round() as u64;

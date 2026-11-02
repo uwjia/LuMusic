@@ -324,21 +324,23 @@ describe('mock import seam', () => {
     );
   });
 
-  // Mirrors the backend format gate: M4A/AIFF joined the set, while raw
-  // ADTS .aac and the video .mp4 container stay out.
-  it('imports m4a and aiff, skips aac (ADTS) and mp4 (video)', async () => {
+  // Mirrors the backend format gate: M4A/AIFF/APE joined the set, while
+  // raw ADTS .aac and the video .mp4 container stay out.
+  it('imports m4a, aiff and ape; skips wv, aac (ADTS) and mp4 (video)', async () => {
     const summary = await mockApi.libraryImport([
       'C:/drop/iphone rip.m4a',
       'C:/drop/vinyl rip.aiff',
-      'C:/drop/lossless.ape',
+      'C:/drop/old rip.ape',
+      'C:/drop/wavpack.wv',
       'C:/drop/concert.mp4',
     ]);
-    expect(summary).toMatchObject({ imported: 2, skipped: 2 });
-    expect(summary.warnings.some((w) => w.includes('lossless.ape'))).toBe(true);
+    expect(summary).toMatchObject({ imported: 3, skipped: 2 });
+    expect(summary.warnings.some((w) => w.includes('wavpack.wv'))).toBe(true);
     expect(summary.warnings.some((w) => w.includes('concert.mp4'))).toBe(true);
     expect(await mockApi.getTracks()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'C:/drop/iphone rip.m4a', title: 'iphone rip' }),
+        expect.objectContaining({ id: 'C:/drop/old rip.ape', title: 'old rip' }),
       ]),
     );
   });

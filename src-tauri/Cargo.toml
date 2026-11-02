@@ -24,6 +24,11 @@ rodio = "0.20"
 # maintained pure-Rust adapter — hand-rolling SMTC via `windows` would be
 # a far larger dependency footprint.
 souvlaki = "0.9"
+# Monkey's Audio decoding: symphonia has no APE codec (its `ape` feature
+# is tag metadata only), and this is the only maintained pure-Rust
+# decoder — streaming frames, sample-accurate seek, byte-verified against
+# the C++ reference, only two tiny deps (crc32fast, md-5).
+ape-decoder = "0.3"
 symphonia = { version = "0.5", default-features = false, features = [
     "mp3",
     "flac",

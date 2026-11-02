@@ -11,8 +11,9 @@ strictly layered architecture and tests accompanying every behavior.
   switchable in Settings (`src/i18n/`, dictionary key parity enforced by types),
   choice persisted in localStorage
 - Scan a music folder and build a searchable, sortable library
-  (MP3 / FLAC / WAV / OGG / M4A (AAC/ALAC) / AIFF; raw ADTS `.aac` and the
-  video `.mp4` container are deliberately not scanned)
+  (MP3 / FLAC / WAV / OGG / M4A (AAC/ALAC) / AIFF / APE (Monkey's Audio
+  3.95+); raw ADTS `.aac` and the video `.mp4` container are deliberately
+  not scanned)
 - Automatic mojibake repair: legacy GBK/Big5/Shift-JIS tags misread as Latin-1
   (e.g. `ÄãºÃ` -> `你好`) are fixed with a high-confidence heuristic
   (`domain/encoding.rs`, Western titles are never rewritten)

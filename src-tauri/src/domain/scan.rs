@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use super::playlist::AutoPlaylistSpec;
 use super::track::TrackId;
 
-/// File extensions the audio stack can decode (keep in sync with symphonia
-/// features enabled in Cargo.toml). Deliberately NOT listed: `.aac` (raw
-/// ADTS — symphonia 0.5 has no ADTS reader), `.mp4` (a video container;
-/// scanning it would pull movies into a music library) and APE/WavPack/
-/// DSD/Opus (no upstream decoder).
+/// File extensions the audio stack can decode (keep in sync with the
+/// symphonia features in Cargo.toml and the `ape-decoder` adapter).
+/// Deliberately NOT listed: `.aac` (raw ADTS — symphonia 0.5 has no ADTS
+/// reader), `.mp4` (a video container; scanning it would pull movies into
+/// a music library) and WavPack/DSD/Opus (no upstream decoder).
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     "mp3",
     "flac",
@@ -24,6 +24,8 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &[
     // AIFF (PCM).
     "aif",
     "aiff",
+    // Monkey's Audio, via infra/audio/ape_source (ape-decoder crate).
+    "ape",
 ];
 
 /// Returns true when the extension is a supported audio format
@@ -194,11 +196,14 @@ mod tests {
             "C.WAV",
             "d.ogg",
             "e.oga",
-            // M4A (AAC/ALAC in an MP4 container) and AIFF joined the set.
+            // M4A (AAC/ALAC in an MP4 container), AIFF and APE joined
+            // the set.
             "f.m4a",
             "g.M4A",
             "h.aif",
             "i.AIFF",
+            "j.ape",
+            "k.APE",
         ] {
             assert!(is_audio_file(Path::new(name)), "{name} should match");
         }
@@ -208,7 +213,7 @@ mod tests {
     fn is_audio_file_rejects_unsupported_or_missing_extensions() {
         for name in [
             "a.txt",
-            "b.ape",
+            "b.wv",
             "c.opus",
             "noext",
             "a.mp3.bak",
