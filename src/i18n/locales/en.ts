@@ -99,11 +99,11 @@ export const en = {
   'fx.aurora': 'Aurora',
   'fx.starfield': 'Starfield',
   'fx.bubbles': 'Bubbles',
-  'fx.particles': 'Particles',
   'fx.wave': 'Waves',
   'fx.moonsea': 'Moon & Stars',
   'fx.snow': 'Snowfall',
   'fx.village': 'Village',
+  'fx.sunset': 'Sunset over Mountains',
   'fx.canvasLabel': 'Artistic background effect',
 
   // equalizer panel

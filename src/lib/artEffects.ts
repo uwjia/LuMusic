@@ -1,6 +1,6 @@
 // Art effect registry for the lyrics-page background: preset ids, the
 // i18n label mapping and localStorage persistence. Pure logic — the
-// drawing itself lives in features/lyrics/artRenderers.
+// drawing itself lives in features/lyrics/art (one module per effect).
 //
 // The choice is a pure-UI visual preference, so it persists next to the
 // language key in localStorage instead of the backend settings file
@@ -13,11 +13,11 @@ export type ArtEffectId =
   | 'aurora'
   | 'starfield'
   | 'bubbles'
-  | 'particles'
   | 'wave'
   | 'moonsea'
   | 'snow'
-  | 'village';
+  | 'village'
+  | 'sunset';
 
 /** Presets in display order; `off` first is the default/no-effect state. */
 export const ART_EFFECTS: readonly ArtEffectId[] = [
@@ -25,11 +25,11 @@ export const ART_EFFECTS: readonly ArtEffectId[] = [
   'aurora',
   'starfield',
   'bubbles',
-  'particles',
   'wave',
   'moonsea',
   'snow',
   'village',
+  'sunset',
 ];
 
 export const DEFAULT_ART_EFFECT: ArtEffectId = 'off';
@@ -40,11 +40,11 @@ export const ART_EFFECT_LABEL_KEY: Record<ArtEffectId, MessageKey> = {
   aurora: 'fx.aurora',
   starfield: 'fx.starfield',
   bubbles: 'fx.bubbles',
-  particles: 'fx.particles',
   wave: 'fx.wave',
   moonsea: 'fx.moonsea',
   snow: 'fx.snow',
   village: 'fx.village',
+  sunset: 'fx.sunset',
 };
 
 export const ART_EFFECT_STORAGE_KEY = 'lumusic.artEffect';

@@ -14,7 +14,8 @@ import { api } from '@/api';
 import { useTranslation } from '@/i18n';
 import { useArtEffectStore } from '@/stores/artEffectStore';
 import { SPECTRUM_BARS } from '@/types/track';
-import { ART_RENDERERS, type FxColors } from '@/features/lyrics/artRenderers';
+import { ART_RENDERERS } from '@/features/lyrics/art/registry';
+import type { FxColors } from '@/features/lyrics/art/fxTypes';
 
 /** Per-frame approach factor toward the raw energy target (0..1). */
 const ENERGY_SMOOTHING = 0.06;
