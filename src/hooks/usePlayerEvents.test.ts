@@ -4,6 +4,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { api } from '@/api';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlayerStore } from '@/stores/playerStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { usePlayerEvents } from '@/hooks/usePlayerEvents';
 
 type Handler = (payload: unknown) => void;
@@ -29,6 +30,7 @@ vi.mock('@/api', () => ({
     }),
     getTracks: vi.fn().mockResolvedValue([]),
     playlistList: vi.fn().mockResolvedValue([]),
+    playerQueue: vi.fn().mockResolvedValue({ tracks: [], position: null }),
   },
 }));
 
@@ -47,6 +49,7 @@ const idleState = {
 beforeEach(() => {
   handlers.clear();
   usePlayerStore.setState({ state: null, error: null });
+  useQueueStore.setState({ open: false, queue: null, error: null });
   useLibraryStore.setState({ tracks: [], scanProgress: null });
 });
 
@@ -111,6 +114,24 @@ describe('usePlayerEvents', () => {
     expect(usePlayerStore.getState().state).toEqual(
       expect.objectContaining({ positionSecs: 0.25, durationSecs: 180 }),
     );
+  });
+
+  // State events are transitions (load/next/queue edits/auto-advance), so
+  // they are the queue panel's refresh signal; progress ticks must not be.
+  it('refreshes the queue snapshot on state events', async () => {
+    renderHook(() => usePlayerEvents());
+    act(() => handlers.get('state')!(idleState));
+    expect(usePlayerStore.getState().state).toEqual(idleState);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.playerQueue).toHaveBeenCalledTimes(1);
+
+    // Progress ticks leave the queue fetch count alone.
+    act(() =>
+      handlers.get('progress')!({ trackId: null, positionSecs: 12.5, durationSecs: 100 }),
+    );
+    expect(api.playerQueue).toHaveBeenCalledTimes(1);
   });
 
   it('feeds scan progress and reloads the library on update', () => {

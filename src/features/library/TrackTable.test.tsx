@@ -81,4 +81,31 @@ describe('TrackTable', () => {
     expect(screen.getByText('Nothing here')).toBeInTheDocument();
     expect(screen.queryByTestId('track-row-0')).toBeNull();
   });
+
+  describe('context menu', () => {
+    const playNext = vi.fn();
+    const addToQueue = vi.fn();
+
+    const entries = (t: Track) => [
+      { key: 'play-next', label: 'Play next', onSelect: () => playNext(t.id) },
+      { key: 'add-to-queue', label: 'Add to queue', onSelect: () => addToQueue(t.id) },
+    ];
+
+    it('right-click opens the menu and runs the picked entry', () => {
+      renderTable({ contextMenuEntries: entries });
+      fireEvent.contextMenu(screen.getByTestId('track-row-1'), { clientX: 40, clientY: 60 });
+      const menu = screen.getByRole('menu');
+      expect(menu).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Play next' }));
+      expect(playNext).toHaveBeenCalledWith('b');
+      // Activation closes the menu again.
+      expect(screen.queryByRole('menu')).toBeNull();
+    });
+
+    it('is absent when no entries are provided', () => {
+      renderTable();
+      fireEvent.contextMenu(screen.getByTestId('track-row-0'), { clientX: 10, clientY: 10 });
+      expect(screen.queryByRole('menu')).toBeNull();
+    });
+  });
 });

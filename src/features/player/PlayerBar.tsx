@@ -11,6 +11,7 @@ import { useLyricsStore } from '@/stores/lyricsStore';
 import { useEqualizerStore } from '@/stores/equalizerStore';
 import { useSpectrumStore } from '@/stores/spectrumStore';
 import { useArtEffectStore } from '@/stores/artEffectStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { MODE_ICON } from '@/features/player/ModeIcons';
 import { LyricsIcon } from '@/features/lyrics/LyricsIcons';
 import { EqualizerIcon } from '@/features/player/EqualizerIcons';
@@ -18,6 +19,8 @@ import { EqualizerPanel } from '@/features/player/EqualizerPanel';
 import { SpectrumIcon } from '@/features/player/SpectrumIcons';
 import { ArtEffectIcon } from '@/features/player/ArtEffectIcons';
 import { ArtEffectsPanel } from '@/features/player/ArtEffectsPanel';
+import { QueueIcon } from '@/features/player/QueueIcons';
+import { QueuePanel } from '@/features/player/QueuePanel';
 import { VolumeControl } from '@/features/player/VolumeControl';
 const MODE_LABEL_KEY: Record<
   PlayMode,
@@ -36,26 +39,30 @@ export function PlayerBar() {
   const eqOpen = useEqualizerStore((s) => s.open);
   const spectrumOpen = useSpectrumStore((s) => s.open);
   const fxOpen = useArtEffectStore((s) => s.open);
+  const queueOpen = useQueueStore((s) => s.open);
   const [volumeOpen, setVolumeOpen] = useState(false);
   const { toggle, next, prev, seek, cyclePlayMode } = usePlayerStore.getState();
   const toggleLyrics = useLyricsStore.getState().toggle;
-  // All four popovers anchor to the bar's right edge: only one may be
-  // open, so each toggle closes the other three.
+  // All five popovers anchor to the bar's right edge: only one may be
+  // open, so each toggle closes the other four.
   const toggleEq = () => openPopover('eq', !useEqualizerStore.getState().open);
   const toggleSpectrum = () =>
     openPopover('spectrum', !useSpectrumStore.getState().open);
   const toggleFx = () => openPopover('fx', !useArtEffectStore.getState().open);
+  const toggleQueue = () => openPopover('queue', !useQueueStore.getState().open);
   const toggleVolume = () => openPopover('volume', !volumeOpen);
-  const openPopover = (which: 'eq' | 'spectrum' | 'fx' | 'volume', open: boolean) => {
+  const openPopover = (which: 'eq' | 'spectrum' | 'fx' | 'queue' | 'volume', open: boolean) => {
     useEqualizerStore.getState().setOpen(which === 'eq' ? open : false);
     useSpectrumStore.getState().setOpen(which === 'spectrum' ? open : false);
     useArtEffectStore.getState().setOpen(which === 'fx' ? open : false);
+    useQueueStore.getState().setOpen(which === 'queue' ? open : false);
     setVolumeOpen(which === 'volume' ? open : false);
   };
   // Anchors for the popovers' outside-press exclusion (the toggle buttons
   // themselves must toggle, not close-then-reopen).
   const eqToggleRef = useRef<HTMLButtonElement>(null);
   const fxToggleRef = useRef<HTMLButtonElement>(null);
+  const queueToggleRef = useRef<HTMLButtonElement>(null);
   const { t } = useTranslation();
 
   if (!state) {
@@ -85,6 +92,7 @@ export function PlayerBar() {
       {/* No SpectrumPanel here: it overlays the content area, so App
           mounts it inside <main class="content"> (see .spectrum-panel). */}
       {fxOpen ? <ArtEffectsPanel anchorRef={fxToggleRef} /> : null}
+      {queueOpen ? <QueuePanel anchorRef={queueToggleRef} /> : null}
 
       <div className="transport">
         {/* 2+2 symmetric cluster around the play button: play mode flanks
@@ -140,6 +148,16 @@ export function PlayerBar() {
       </div>
 
       <div className="bar-tools">
+        <IconButton
+          ref={queueToggleRef}
+          label={queueOpen ? t('player.hideQueue') : t('player.showQueue')}
+          active={queueOpen}
+          aria-pressed={queueOpen}
+          onClick={toggleQueue}
+          data-testid="queue-toggle"
+        >
+          <QueueIcon />
+        </IconButton>
         <IconButton
           ref={eqToggleRef}
           label={eqOpen ? t('player.hideEqualizer') : t('player.showEqualizer')}

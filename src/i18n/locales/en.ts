@@ -48,6 +48,7 @@ export const en = {
   'table.album': 'Album',
   'table.duration': 'Time',
   'table.playing': 'playing',
+  'table.trackActions': 'Track actions',
   'table.emptyTitle': 'No tracks yet',
   'table.emptyHint': 'Scan a music folder to fill your library.',
 
@@ -73,6 +74,19 @@ export const en = {
   'player.hideSpectrum': 'Hide spectrum',
   'player.showArtEffects': 'Show art effects',
   'player.hideArtEffects': 'Hide art effects',
+  'player.showQueue': 'Show play queue',
+  'player.hideQueue': 'Hide play queue',
+
+  // play queue panel
+  'queue.title': 'Queue',
+  'queue.count': '{count} tracks',
+  'queue.countOne': '{count} track',
+  'queue.empty': 'Nothing queued',
+  'queue.emptyHint': 'Double-click a track to play it, or right-click one and pick Play next.',
+  'queue.playNext': 'Play next',
+  'queue.addToQueue': 'Add to queue',
+  'queue.remove': 'Remove {title} from queue',
+  'queue.play': 'Play {title}',
 
   // spectrum panel
   'spectrum.title': 'Spectrum',

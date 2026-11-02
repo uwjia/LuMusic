@@ -9,6 +9,7 @@ import type {
   PlayerState,
   Playlist,
   ProgressPayload,
+  QueueView,
   ScanProgress,
   ScanSummary,
   Settings,
@@ -46,6 +47,18 @@ export interface PlayerApi {
   playerSeek(secs: number): Promise<PlayerState>;
   playerSetVolume(volume: number): Promise<PlayerState>;
   playerSetMode(shuffle?: boolean, repeat?: PlayerState['repeat']): Promise<PlayerState>;
+
+  // queue editing (queue panel / track context menu)
+  /** Queue contents with the playing row marked. */
+  playerQueue(): Promise<QueueView>;
+  /** Queues a track right after the current one (plays it when idle). */
+  playerQueueInsertNext(trackId: TrackId): Promise<PlayerState>;
+  /** Appends a track to the queue's tail (plays it when idle). */
+  playerQueueAppend(trackId: TrackId): Promise<PlayerState>;
+  /** Removes an upcoming queue row (the playing row is rejected). */
+  playerQueueRemove(index: number): Promise<PlayerState>;
+  /** Jumps playback to a queue row. */
+  playerQueueJump(index: number): Promise<PlayerState>;
 
   // lyrics
   /** Parsed lyrics for a track; null when the track has no `.lrc` file. */

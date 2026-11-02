@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::dto::{LyricsDto, PlaybackStatus, PlayerStateDto};
+use super::dto::{LyricsDto, PlaybackStatus, PlayerStateDto, QueueDto};
 use crate::domain::equalizer::EqSettings;
 use crate::domain::library::{ImportSummary, LibraryIndex, TrackQuery};
 use crate::domain::lyrics;
 use crate::domain::playlist::{Playlist, PlaylistCollection, PlaylistError};
-use crate::domain::queue::{AdvanceOutcome, Queue, RepeatMode};
+use crate::domain::queue::{AdvanceOutcome, Queue, RemoveError, RepeatMode};
 use crate::domain::scan::ScanSummary;
 use crate::domain::session::PlaybackSession;
 use crate::domain::settings::Settings;
@@ -41,6 +41,10 @@ pub enum PlayerError {
     TrackNotFound(TrackId),
     #[error("queue is empty")]
     EmptyQueue,
+    #[error("queue index {0} is out of range")]
+    QueueIndexOutOfRange(usize),
+    #[error("cannot remove the playing track from the queue")]
+    CannotRemovePlayingTrack,
     #[error("no music folder has been scanned yet")]
     NoMusicFolder,
     #[error("playlist '{0}' has no folder on disk")]
@@ -503,6 +507,87 @@ impl PlayerService {
             Some(id) => self.load_track(&id),
             None => Ok(()), // stay on the first track
         }
+    }
+
+    // ----- queue editing (queue panel / track context menu) -----
+
+    /// Queue contents for the panel: items resolved to tracks. An id whose
+    /// track left the library since the queue was built (rescan pruned it)
+    /// is skipped, and `position` is mapped onto the *resolved* list so the
+    /// panel highlights exactly the row that is playing.
+    pub fn queue_tracks(&self) -> QueueDto {
+        let current = self.queue.current_item_index();
+        let mut tracks = Vec::with_capacity(self.queue.len());
+        let mut position = None;
+        for (index, id) in self.queue.items().iter().enumerate() {
+            if Some(index) == current {
+                position = Some(tracks.len());
+            }
+            if let Some(track) = self.library.get(id) {
+                tracks.push(track.clone());
+            }
+        }
+        QueueDto { tracks, position }
+    }
+
+    /// Queues a track to play *next* (right after the current one, in the
+    /// visible order and the play sequence alike — it really is next under
+    /// shuffle too). On an idle player the inserted track also starts
+    /// playing: a "play next" from an empty queue must not be a silent
+    /// no-op.
+    pub fn queue_insert_next(&mut self, track_id: TrackId) -> Result<(), PlayerError> {
+        if self.library.get(&track_id).is_none() {
+            return Err(PlayerError::TrackNotFound(track_id));
+        }
+        let was_idle = self.queue.is_empty();
+        self.queue.insert_next(track_id);
+        if was_idle {
+            let id = self.queue.current().ok_or(PlayerError::EmptyQueue)?;
+            self.load_track(&id)
+        } else {
+            self.save_playback_session();
+            Ok(())
+        }
+    }
+
+    /// Appends a track to the queue's tail (plays after everything that is
+    /// already queued). An empty queue degenerates to "play it now".
+    pub fn queue_append(&mut self, track_id: TrackId) -> Result<(), PlayerError> {
+        if self.library.get(&track_id).is_none() {
+            return Err(PlayerError::TrackNotFound(track_id));
+        }
+        if self.queue.is_empty() {
+            return self.queue_insert_next(track_id);
+        }
+        self.shuffle_seed += 1;
+        self.queue.append(vec![track_id], self.shuffle_seed);
+        self.save_playback_session();
+        Ok(())
+    }
+
+    /// Removes an upcoming item from the queue. The playing track itself
+    /// is rejected — dropping it would leave the engine playing a track
+    /// the queue no longer knows about.
+    pub fn queue_remove(&mut self, item_index: usize) -> Result<(), PlayerError> {
+        self.queue
+            .remove_item(item_index)
+            .map_err(|err| match err {
+                RemoveError::OutOfRange => PlayerError::QueueIndexOutOfRange(item_index),
+                RemoveError::CurrentTrack => PlayerError::CannotRemovePlayingTrack,
+            })?;
+        self.save_playback_session();
+        Ok(())
+    }
+
+    /// Jumps playback to an arbitrary queue item (the panel row click);
+    /// same load path as next/previous, so position events and the session
+    /// stay consistent.
+    pub fn queue_jump(&mut self, item_index: usize) -> Result<(), PlayerError> {
+        let id = self
+            .queue
+            .jump_to_item(item_index)
+            .ok_or(PlayerError::QueueIndexOutOfRange(item_index))?;
+        self.load_track(&id)
     }
 
     /// Seeks within the current track; clamped to the known duration.
@@ -1534,6 +1619,156 @@ mod tests {
             service.reveal_playlist_folder("auto:all"),
             Err(PlayerError::Reveal(_))
         ));
+    }
+
+    // ---------- queue editing (panel / context menu) ----------
+
+    #[test]
+    fn queue_view_resolves_items_and_marks_the_current_row() {
+        let (service, _engine, _dir) = service_with_tracks();
+        let view = service.queue_tracks();
+        assert_eq!(view.tracks.len(), 0);
+        assert_eq!(view.position, None);
+
+        let (mut service, _engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(1), None)
+            .unwrap();
+        let view = service.queue_tracks();
+        assert_eq!(
+            view.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            vec!["C:/lib/a.mp3", "C:/lib/b.mp3"]
+        );
+        assert_eq!(view.position, Some(1));
+    }
+
+    #[test]
+    fn insert_next_plays_after_the_current_track_without_restarting_it() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0), None)
+            .unwrap();
+        service.queue_insert_next("C:/lib/b.mp3".into()).unwrap();
+        assert_eq!(service.state().queue_len, 3);
+        // No engine reload: the current track keeps playing untouched.
+        assert_eq!(
+            log_of(&engine).iter().filter(|l| l.starts_with("open")).count(),
+            1
+        );
+        service.next().unwrap();
+        assert_eq!(
+            service.state().current_track.unwrap().id,
+            "C:/lib/b.mp3",
+            "the inserted track must be the next one played"
+        );
+        // And the rest of the queue follows behind it.
+        service.next().unwrap();
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/b.mp3");
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+    }
+
+    #[test]
+    fn insert_next_from_an_idle_player_starts_playback() {
+        let (mut service, engine, _dir) = service_with_tracks();
+        service.queue_insert_next("C:/lib/a.mp3".into()).unwrap();
+        let state = service.state();
+        assert_eq!(state.status, PlaybackStatus::Playing);
+        assert_eq!(state.current_track.unwrap().id, "C:/lib/a.mp3");
+        assert_eq!(log_of(&engine).last().unwrap(), "open:C:/lib/a.mp3");
+    }
+
+    #[test]
+    fn queue_append_plays_after_the_whole_queue() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0), None)
+            .unwrap();
+        service.queue_append("C:/lib/a.mp3".into()).unwrap();
+        assert_eq!(service.state().queue_len, 3);
+        service.next().unwrap(); // b
+        service.next().unwrap(); // appended a
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/a.mp3");
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+    }
+
+    #[test]
+    fn queue_append_from_an_idle_player_starts_playback() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        service.queue_append("C:/lib/b.mp3".into()).unwrap();
+        assert_eq!(service.state().status, PlaybackStatus::Playing);
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/b.mp3");
+    }
+
+    #[test]
+    fn queue_editing_rejects_unknown_tracks_and_bad_indices() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        assert!(matches!(
+            service.queue_insert_next("C:/lib/ghost.mp3".into()),
+            Err(PlayerError::TrackNotFound(_))
+        ));
+        assert!(matches!(
+            service.queue_append("C:/lib/ghost.mp3".into()),
+            Err(PlayerError::TrackNotFound(_))
+        ));
+        assert!(matches!(
+            service.queue_remove(0),
+            Err(PlayerError::QueueIndexOutOfRange(0))
+        ));
+        assert!(matches!(
+            service.queue_jump(0),
+            Err(PlayerError::QueueIndexOutOfRange(0))
+        ));
+    }
+
+    #[test]
+    fn queue_remove_drops_upcoming_rows_but_not_the_playing_one() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0), None)
+            .unwrap();
+        assert!(matches!(
+            service.queue_remove(0),
+            Err(PlayerError::CannotRemovePlayingTrack)
+        ));
+        service.queue_remove(1).unwrap(); // drop b, the only upcoming row
+        assert_eq!(service.state().queue_len, 1);
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/a.mp3");
+        // The shortened queue ends after the current track.
+        service.next().unwrap();
+        assert_eq!(service.state().status, PlaybackStatus::Stopped);
+    }
+
+    #[test]
+    fn queue_jump_plays_the_clicked_row() {
+        let (mut service, _engine, _dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0), None)
+            .unwrap();
+        service.queue_jump(1).unwrap();
+        assert_eq!(service.state().current_track.unwrap().id, "C:/lib/b.mp3");
+        assert_eq!(service.state().queue_position, Some(1));
+    }
+
+    #[test]
+    fn queue_edits_persist_into_the_session() {
+        let (mut service, _engine, dir) = service_with_tracks();
+        service
+            .play_queue(vec!["C:/lib/a.mp3".into(), "C:/lib/b.mp3".into()], Some(0), None)
+            .unwrap();
+        service.queue_insert_next("C:/lib/b.mp3".into()).unwrap();
+        assert_eq!(
+            saved_session(dir.path()).map(|s| s.queue),
+            Some(vec![
+                "C:/lib/a.mp3".to_string(),
+                "C:/lib/b.mp3".to_string(),
+                "C:/lib/b.mp3".to_string()
+            ])
+        );
+        service.queue_remove(1).unwrap();
+        assert_eq!(
+            saved_session(dir.path()).map(|s| s.queue),
+            Some(vec!["C:/lib/a.mp3".to_string(), "C:/lib/b.mp3".to_string()])
+        );
     }
 
     // ---------- shuffle wiring ----------

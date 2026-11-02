@@ -5,11 +5,13 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import type { ContextMenuEntry } from '@/components/ui/ContextMenu';
 import { useTranslation } from '@/i18n';
 import { displayPlaylistName } from '@/lib/playlistDisplay';
 import { TrackTable } from '@/features/library/TrackTable';
 import { usePlayerStore } from '@/stores/playerStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
+import { useQueueStore } from '@/stores/queueStore';
 import type { Track } from '@/types/track';
 
 export function PlaylistPage({ playlistId }: { playlistId: string }) {
@@ -22,6 +24,20 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   // Track awaiting removal confirmation: the ✕ sits right in the row, so
   // one stray click must not drop the track — the button only stages it.
   const [confirmingTrack, setConfirmingTrack] = useState<Track | null>(null);
+
+  // Right-click menu: queue actions shared with the library page.
+  const queueMenu = (track: Track): ContextMenuEntry[] => [
+    {
+      key: 'play-next',
+      label: t('queue.playNext'),
+      onSelect: () => void useQueueStore.getState().insertNext(track.id),
+    },
+    {
+      key: 'add-to-queue',
+      label: t('queue.addToQueue'),
+      onSelect: () => void useQueueStore.getState().append(track.id),
+    },
+  ];
 
   const playlist = playlists.find((p) => p.id === playlistId);
   if (!playlist) {
@@ -62,6 +78,7 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
         onPlay={(index) =>
           void usePlayerStore.getState().load(tracks.map((tr) => tr.id), index, playlistId)
         }
+        contextMenuEntries={queueMenu}
         emptyTitle={t('playlist.empty')}
         emptyHint={t('playlist.emptyHint')}
         rowAction={(track) => (

@@ -1,8 +1,9 @@
 // Virtualized track table: sort headers, current-track highlight,
-// double-click to play from a position.
+// double-click to play from a position, optional per-row context menu.
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { ContextMenu, type ContextMenuEntry } from '@/components/ui/ContextMenu';
 import { formatDuration } from '@/lib/format';
 import { useTranslation } from '@/i18n';
 import type { SortField, Track } from '@/types/track';
@@ -17,6 +18,8 @@ interface TrackTableProps {
   onSort: (field: SortField) => void;
   /** Start playback with `tracks[index]` as the current track. */
   onPlay: (index: number) => void;
+  /** Entries for the row's right-click menu; omitting it disables the menu. */
+  contextMenuEntries?: (track: Track) => ContextMenuEntry[];
   /** Optional per-row action (e.g. "add to playlist"). */
   rowAction?: (track: Track) => React.ReactNode;
   emptyTitle?: string;
@@ -41,12 +44,15 @@ export function TrackTable({
   descending,
   onSort,
   onPlay,
+  contextMenuEntries,
   rowAction,
   emptyTitle,
   emptyHint,
 }: TrackTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
+  // Context menu target: which row was right-clicked, and where.
+  const [menu, setMenu] = useState<{ track: Track; x: number; y: number } | null>(null);
   const virtualizer = useVirtualizer({
     count: tracks.length,
     getScrollElement: () => parentRef.current,
@@ -108,6 +114,15 @@ export function TrackTable({
                   transform: `translateY(${row.start}px)`,
                 }}
                 onDoubleClick={() => onPlay(row.index)}
+                onContextMenu={
+                  contextMenuEntries
+                    ? (e) => {
+                        // Suppress the native menu — the app renders its own.
+                        e.preventDefault();
+                        setMenu({ track, x: e.clientX, y: e.clientY });
+                      }
+                    : undefined
+                }
                 data-testid={`track-row-${row.index}`}
               >
                 <span className={`cell ${COLUMNS[0].className}`}>
@@ -127,6 +142,16 @@ export function TrackTable({
           })}
         </div>
       </div>
+
+      {menu && contextMenuEntries ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          ariaLabel={t('table.trackActions')}
+          items={contextMenuEntries(menu.track)}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

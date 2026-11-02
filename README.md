@@ -15,6 +15,15 @@ strictly layered architecture and tests accompanying every behavior.
   (e.g. `ÄãºÃ` -> `你好`) are fixed with a high-confidence heuristic
   (`domain/encoding.rs`, Western titles are never rewritten)
 - Play / pause / seek / volume, shuffle, repeat (off / all / one) with auto-advance
+- Play queue panel ("up next" popover) with per-row jump/remove; any track row
+  offers "Play next" / "Add to queue" via a custom right-click menu
+  (`player_queue_*` commands; the queue itself survives restarts)
+- OS media session (Windows SMTC / Linux MPRIS via `souvlaki`): metadata,
+  playback state and timeline in the OS flyout; hardware media keys,
+  lock-screen and headphone controls route back through the same service
+- Short gain fades on track start, pause and resume (`infra/audio/fade`,
+  sample-accurate source wrapper; paused sinks are muted only after the
+  fade drains, and a canceled fade-out never fires)
 - Playlists: create, rename, delete, add/remove/reorder tracks
 - Auto playlists from the folder structure: one playlist per first-level
   folder, root-level files go to `Default`, everything into `All Tracks`;

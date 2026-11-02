@@ -61,6 +61,12 @@ export const tauriApi: PlayerApi = {
   playerSetVolume: (volume) => invoke('player_set_volume', { volume }),
   playerSetMode: (shuffle, repeat) => invoke('player_set_mode', { shuffle, repeat }),
 
+  playerQueue: () => invoke('player_queue_get'),
+  playerQueueInsertNext: (trackId) => invoke('player_queue_insert_next', { trackId }),
+  playerQueueAppend: (trackId) => invoke('player_queue_append', { trackId }),
+  playerQueueRemove: (index) => invoke('player_queue_remove', { index }),
+  playerQueueJump: (index) => invoke('player_queue_jump', { index }),
+
   lyricsGet: (trackId) => invoke('lyrics_get', { trackId }),
 
   playlistList: () => invoke('playlist_list'),

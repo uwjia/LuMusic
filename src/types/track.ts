@@ -46,6 +46,14 @@ export interface PlayerState {
   queueSourceId?: string | null;
 }
 
+/** Queue snapshot for the play-queue panel (`playerQueue`). */
+export interface QueueView {
+  /** Items resolved to tracks (ids whose track left the library vanish). */
+  tracks: Track[];
+  /** Index into `tracks` of the playing row; null when idle. */
+  position: number | null;
+}
+
 export interface Playlist {
   id: string;
   name: string;

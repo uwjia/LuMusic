@@ -14,6 +14,7 @@ import type {
   PlayerState,
   Playlist,
   ProgressPayload,
+  QueueView,
   RepeatMode,
   ScanProgress,
   ScanSummary,
@@ -433,6 +434,67 @@ class MockApi implements PlayerApi {
   async playerSetMode(shuffle?: boolean, repeat?: RepeatMode) {
     if (shuffle != null) this.shuffle = shuffle;
     if (repeat != null) this.repeat = repeat;
+    this.publish();
+    return this.snapshot();
+  }
+
+  async playerQueue(): Promise<QueueView> {
+    return { tracks: [...this.queue], position: this.queuePosition };
+  }
+
+  async playerQueueInsertNext(trackId: string): Promise<PlayerState> {
+    const track = this.tracks.find((t) => t.id === trackId);
+    if (!track) throw new Error(`track not found: ${trackId}`);
+    if (this.queue.length === 0) {
+      // Mirrors the backend: an idle player starts playing the track.
+      this.queue = [track];
+      this.queuePosition = 0;
+      this.positionSecs = 0;
+      this.status = 'playing';
+      this.ensureTicker();
+    } else {
+      const at = (this.queuePosition ?? 0) + 1;
+      this.queue.splice(at, 0, track);
+    }
+    this.publish();
+    return this.snapshot();
+  }
+
+  async playerQueueAppend(trackId: string): Promise<PlayerState> {
+    const track = this.tracks.find((t) => t.id === trackId);
+    if (!track) throw new Error(`track not found: ${trackId}`);
+    if (this.queue.length === 0) {
+      return this.playerQueueInsertNext(trackId);
+    }
+    this.queue.push(track);
+    this.publish();
+    return this.snapshot();
+  }
+
+  async playerQueueRemove(index: number): Promise<PlayerState> {
+    if (index < 0 || index >= this.queue.length) {
+      throw new Error('queue index out of range');
+    }
+    if (index === this.queuePosition) {
+      // Mirrors the backend: the playing row cannot be dropped.
+      throw new Error('cannot remove the playing track from the queue');
+    }
+    this.queue.splice(index, 1);
+    if (this.queuePosition != null && index < this.queuePosition) {
+      this.queuePosition -= 1;
+    }
+    this.publish();
+    return this.snapshot();
+  }
+
+  async playerQueueJump(index: number): Promise<PlayerState> {
+    if (index < 0 || index >= this.queue.length) {
+      throw new Error('queue index out of range');
+    }
+    this.queuePosition = index;
+    this.positionSecs = 0;
+    this.status = 'playing';
+    this.ensureTicker();
     this.publish();
     return this.snapshot();
   }

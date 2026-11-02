@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use super::dto::{LyricsDto, PlayerStateDto, ScanProgressDto};
+use super::dto::{LyricsDto, PlayerStateDto, QueueDto, ScanProgressDto};
 use super::service::{PlayerError, PlayerService};
 use super::state::SharedService;
 use super::tray::{TrayController, TrayLabels};
@@ -30,7 +30,8 @@ pub fn app_info() -> Value {
 }
 
 /// Emits the current player state to all windows and refreshes the tray
-/// menu/tooltip in the same step, so every surface stays consistent.
+/// menu/tooltip and the OS media session in the same step, so every
+/// surface stays consistent.
 pub fn emit_state(app: &AppHandle, service: &PlayerService) {
     let state = service.state();
     if let Some(tray) = app.try_state::<Mutex<TrayController>>() {
@@ -38,6 +39,7 @@ pub fn emit_state(app: &AppHandle, service: &PlayerService) {
             controller.update_player_state(&state);
         }
     }
+    super::media::publish(app, &state);
     if let Err(err) = app.emit(ev::EVENT_PLAYER_STATE, &state) {
         tracing::warn!("failed to emit player state: {err}");
     }
@@ -293,6 +295,72 @@ pub fn player_set_mode(
     if let Some(mode) = repeat {
         service.set_repeat(mode);
     }
+    let dto = service.state();
+    emit_state(&app, &service);
+    Ok(dto)
+}
+
+// ----- queue editing (queue panel / track context menu) -----
+
+/// Queue contents for the play-queue panel.
+#[tauri::command]
+pub fn player_queue_get(state: State<'_, SharedService>) -> Result<QueueDto, String> {
+    let service = state.lock().map_err(|_| "service poisoned")?;
+    Ok(service.queue_tracks())
+}
+
+/// Queues a track to play right after the current one (starts playback
+/// when the queue is empty).
+#[tauri::command]
+pub fn player_queue_insert_next(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+    track_id: TrackId,
+) -> Result<PlayerStateDto, String> {
+    let mut service = state.lock().map_err(|_| "service poisoned")?;
+    map(service.queue_insert_next(track_id))?;
+    let dto = service.state();
+    emit_state(&app, &service);
+    Ok(dto)
+}
+
+/// Appends a track to the end of the queue.
+#[tauri::command]
+pub fn player_queue_append(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+    track_id: TrackId,
+) -> Result<PlayerStateDto, String> {
+    let mut service = state.lock().map_err(|_| "service poisoned")?;
+    map(service.queue_append(track_id))?;
+    let dto = service.state();
+    emit_state(&app, &service);
+    Ok(dto)
+}
+
+/// Removes an upcoming queue item (the playing row is rejected).
+#[tauri::command]
+pub fn player_queue_remove(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+    index: usize,
+) -> Result<PlayerStateDto, String> {
+    let mut service = state.lock().map_err(|_| "service poisoned")?;
+    map(service.queue_remove(index))?;
+    let dto = service.state();
+    emit_state(&app, &service);
+    Ok(dto)
+}
+
+/// Jumps playback to a queue row.
+#[tauri::command]
+pub fn player_queue_jump(
+    app: AppHandle,
+    state: State<'_, SharedService>,
+    index: usize,
+) -> Result<PlayerStateDto, String> {
+    let mut service = state.lock().map_err(|_| "service poisoned")?;
+    map(service.queue_jump(index))?;
     let dto = service.state();
     emit_state(&app, &service);
     Ok(dto)

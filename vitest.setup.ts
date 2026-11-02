@@ -20,18 +20,21 @@ if (!('ResizeObserver' in globalThis)) {
   globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
 
-// jsdom always reports 0x0 element sizes. The virtualized track table derives
-// its viewport from the scroll element's clientWidth/clientHeight, so give
-// that element a size (other elements keep the jsdom default of 0).
+// jsdom always reports 0x0 element sizes. The virtualized track table and
+// queue panel derive their viewport from the scroll element's
+// clientWidth/clientHeight, so give those elements a size (other elements
+// keep the jsdom default of 0).
 Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
   configurable: true,
   get(this: HTMLElement) {
-    return this.classList.contains('track-body') ? 600 : 0;
+    if (this.classList.contains('track-body')) return 600;
+    return this.classList.contains('queue-list') ? 320 : 0;
   },
 });
 Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
   configurable: true,
   get(this: HTMLElement) {
-    return this.classList.contains('track-body') ? 900 : 0;
+    if (this.classList.contains('track-body')) return 900;
+    return this.classList.contains('queue-list') ? 420 : 0;
   },
 });

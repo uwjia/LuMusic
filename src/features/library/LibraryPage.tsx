@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import type { ContextMenuEntry } from '@/components/ui/ContextMenu';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlayerStore } from '@/stores/playerStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { useTranslation } from '@/i18n';
 import { TrackTable } from '@/features/library/TrackTable';
+import type { Track } from '@/types/track';
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -40,6 +43,20 @@ export function LibraryPage({ onOpenSettings }: LibraryPageProps) {
     tracks.length === 1
       ? t('library.trackCountOne', { count: tracks.length })
       : t('library.trackCount', { count: tracks.length });
+
+  // Right-click menu: queue actions shared with the playlist page.
+  const queueMenu = (track: Track): ContextMenuEntry[] => [
+    {
+      key: 'play-next',
+      label: t('queue.playNext'),
+      onSelect: () => void useQueueStore.getState().insertNext(track.id),
+    },
+    {
+      key: 'add-to-queue',
+      label: t('queue.addToQueue'),
+      onSelect: () => void useQueueStore.getState().append(track.id),
+    },
+  ];
 
   return (
     <section className="page" data-testid="library-page">
@@ -91,6 +108,7 @@ export function LibraryPage({ onOpenSettings }: LibraryPageProps) {
         descending={query.descending}
         onSort={(field) => void toggleSort(field)}
         onPlay={(index) => void usePlayerStore.getState().load(tracks.map((tr) => tr.id), index)}
+        contextMenuEntries={queueMenu}
         emptyTitle={query.search ? t('library.noMatches') : t('library.empty')}
         emptyHint={
           query.search ? t('library.noMatchesHint') : t('library.emptyHint')

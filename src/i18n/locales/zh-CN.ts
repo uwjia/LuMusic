@@ -48,6 +48,7 @@ export const zhCN: Record<MessageKey, string> = {
   'table.album': '专辑',
   'table.duration': '时长',
   'table.playing': '正在播放',
+  'table.trackActions': '曲目操作',
   'table.emptyTitle': '还没有曲目',
   'table.emptyHint': '扫描一个音乐文件夹来填充你的音乐库。',
 
@@ -73,6 +74,19 @@ export const zhCN: Record<MessageKey, string> = {
   'player.hideSpectrum': '隐藏频谱',
   'player.showArtEffects': '显示艺术特效',
   'player.hideArtEffects': '隐藏艺术特效',
+  'player.showQueue': '显示播放队列',
+  'player.hideQueue': '隐藏播放队列',
+
+  // 播放队列面板
+  'queue.title': '播放队列',
+  'queue.count': '{count} 首曲目',
+  'queue.countOne': '{count} 首曲目',
+  'queue.empty': '队列是空的',
+  'queue.emptyHint': '双击曲目即可播放，或右键选择「下一首播放」。',
+  'queue.playNext': '下一首播放',
+  'queue.addToQueue': '加入队列',
+  'queue.remove': '从队列移除 {title}',
+  'queue.play': '播放 {title}',
 
   // spectrum panel
   'spectrum.title': '频谱',

@@ -146,6 +146,82 @@ describe('mock auto playlists', () => {
   });
 });
 
+describe('mock queue seam', () => {
+  it('playerQueue mirrors the queue with the playing row marked', async () => {
+    const tracks = await mockApi.playlistGetTracks('auto:root');
+    await mockApi.playerLoad(tracks.map((t) => t.id), 1);
+    const view = await mockApi.playerQueue();
+    expect(view.tracks.map((t) => t.id)).toEqual(tracks.map((t) => t.id));
+    expect(view.position).toBe(1);
+    await mockApi.playerStop();
+  });
+
+  it('insert next slots the track right after the playing one', async () => {
+    await mockApi.playerLoad(['t1', 't2'], 0);
+    await mockApi.playerQueueInsertNext('t5');
+    const view = await mockApi.playerQueue();
+    expect(view.tracks.map((t) => t.id)).toEqual(['t1', 't5', 't2']);
+    // "Next" now plays the inserted track.
+    const next = await mockApi.playerNext();
+    expect(next.currentTrack?.id).toBe('t5');
+    await mockApi.playerStop();
+  });
+
+  it('insert next on a stopped queue inserts without autoplay', async () => {
+    // The shared singleton still holds the previous test's queue, and —
+    // mirroring the backend — a user stop keeps the queue around: only a
+    // truly empty queue (fresh session) autoplays an insert.
+    await mockApi.playerLoad(['t1', 't2'], 0);
+    await mockApi.playerStop();
+    await mockApi.playerQueueInsertNext('t3');
+    const state = await mockApi.playerState();
+    expect(state.status).toBe('stopped');
+    const view = await mockApi.playerQueue();
+    expect(view.tracks.map((t) => t.id)).toEqual(['t1', 't3', 't2']);
+  });
+
+  it('append queues behind everything and plays it last', async () => {
+    await mockApi.playerLoad(['t1', 't2'], 0);
+    await mockApi.playerQueueAppend('t3');
+    let state = await mockApi.playerNext();
+    expect(state.currentTrack?.id).toBe('t2');
+    state = await mockApi.playerNext();
+    expect(state.currentTrack?.id).toBe('t3');
+    expect(state.status).toBe('playing');
+    await mockApi.playerStop();
+  });
+
+  it('remove drops upcoming rows and fixes the position, rejects the playing row', async () => {
+    await mockApi.playerLoad(['t1', 't2', 't3'], 1); // playing t2
+    await expect(mockApi.playerQueueRemove(1)).rejects.toThrow('playing track');
+    await mockApi.playerQueueRemove(2); // drop t3 (upcoming)
+    let view = await mockApi.playerQueue();
+    expect(view.tracks.map((t) => t.id)).toEqual(['t1', 't2']);
+    expect(view.position).toBe(1);
+    await mockApi.playerQueueRemove(0); // drop t1 (behind the cursor)
+    view = await mockApi.playerQueue();
+    expect(view.tracks.map((t) => t.id)).toEqual(['t2']);
+    expect(view.position).toBe(0);
+    await expect(mockApi.playerQueueRemove(9)).rejects.toThrow('out of range');
+    await mockApi.playerStop();
+  });
+
+  it('jump plays the clicked row from its start', async () => {
+    await mockApi.playerLoad(['t1', 't2', 't3'], 0);
+    const state = await mockApi.playerQueueJump(2);
+    expect(state.currentTrack?.id).toBe('t3');
+    expect(state.queuePosition).toBe(2);
+    expect(state.positionSecs).toBe(0);
+    expect(state.status).toBe('playing');
+    await mockApi.playerStop();
+  });
+
+  it('queue actions on unknown tracks fail like the backend', async () => {
+    await expect(mockApi.playerQueueInsertNext('ghost')).rejects.toThrow('track not found');
+    await expect(mockApi.playerQueueAppend('ghost')).rejects.toThrow('track not found');
+  });
+});
+
 describe('mock settings + tray seam', () => {
   it('settingsGet exposes closeToTray and settingsSet only changes provided fields', async () => {
     expect((await mockApi.settingsGet()).closeToTray).toBe(true);

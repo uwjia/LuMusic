@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod dto;
+pub mod media;
 pub mod service;
 pub mod state;
 pub mod tray;

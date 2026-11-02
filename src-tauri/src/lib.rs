@@ -53,6 +53,11 @@ pub fn run() {
             app::commands::player_seek,
             app::commands::player_set_volume,
             app::commands::player_set_mode,
+            app::commands::player_queue_get,
+            app::commands::player_queue_insert_next,
+            app::commands::player_queue_append,
+            app::commands::player_queue_remove,
+            app::commands::player_queue_jump,
             app::commands::playlist_list,
             app::commands::playlist_create,
             app::commands::playlist_rename,
@@ -104,6 +109,21 @@ pub fn run() {
             app.manage(Mutex::new(controller));
             app.on_menu_event(tray::handle_menu_event);
             app.on_tray_icon_event(tray::handle_tray_icon_event);
+
+            // OS media session (SMTC/MPRIS): hardware media keys, lock
+            // screen and headphone controls. Windows needs the native
+            // window handle; other platforms pass None. Failures degrade
+            // to "no OS integration", never a broken startup.
+            #[cfg(windows)]
+            let hwnd = window.hwnd().ok().map(|handle| handle.0 as *mut std::ffi::c_void);
+            #[cfg(not(windows))]
+            let hwnd = None;
+            let initial_state = poller_service
+                .lock()
+                .expect("fresh service is not poisoned")
+                .state();
+            let media = app::media::MediaController::build(app.handle(), hwnd, &initial_state);
+            app.manage(Mutex::new(media));
 
             let poller_app: tauri::AppHandle<Wry> = app.handle().clone();
             std::thread::Builder::new()
@@ -216,6 +236,10 @@ fn poll_loop(app: tauri::AppHandle<Wry>, service: SharedService) {
                 let state = guard.state();
                 if state.status == app::dto::PlaybackStatus::Playing {
                     let _ = app.emit(ev::EVENT_PLAYER_PROGRESS, ProgressDto::of(&state));
+                    // Keeps the OS flyout timeline honest between
+                    // transitions (seeks/track changes go through
+                    // emit_state anyway).
+                    app::media::publish(&app, &state);
                 }
             }
         }

@@ -34,6 +34,16 @@ pub enum AdvanceOutcome {
     Stopped,
 }
 
+/// Why [`Queue::remove_item`] refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveError {
+    /// No item lives at that index.
+    OutOfRange,
+    /// The index names the track that is playing right now; removing it
+    /// would leave the engine playing a track the queue no longer knows.
+    CurrentTrack,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Queue {
     items: Vec<TrackId>,
@@ -160,6 +170,62 @@ impl Queue {
         self.current_item_index()
             .and_then(|i| self.items.get(i))
             .cloned()
+    }
+
+    /// Inserts `id` as the *next* track to play: right after the current
+    /// item in the visible order, and right after the current position in
+    /// the play sequence (so it really is next under shuffle too). An idle
+    /// queue becomes a one-track queue positioned on the new track.
+    ///
+    /// Both views stay consistent permutations: inserting into `items`
+    /// shifts later indices up, so `play_order` is remapped before the new
+    /// index is spliced in.
+    pub fn insert_next(&mut self, id: TrackId) {
+        let item_at = self.current_item_index().map(|c| c + 1).unwrap_or(0);
+        for index in self.play_order.iter_mut() {
+            if *index >= item_at {
+                *index += 1;
+            }
+        }
+        self.items.insert(item_at, id);
+        let play_at = self.position.map(|p| p + 1).unwrap_or(0);
+        self.play_order.insert(play_at.min(self.play_order.len()), item_at);
+        if self.position.is_none() {
+            // Idle queue: the inserted track is now the current one.
+            self.position = Some(0);
+        }
+    }
+
+    /// Removes the item at `item_index` from both views. Removing the
+    /// current track is rejected (see [`RemoveError::CurrentTrack`]);
+    /// removing an unplayed item keeps the current track and every
+    /// already-played entry reachable from the same position.
+    pub fn remove_item(&mut self, item_index: usize) -> Result<(), RemoveError> {
+        if item_index >= self.items.len() {
+            return Err(RemoveError::OutOfRange);
+        }
+        if self.current_item_index() == Some(item_index) {
+            return Err(RemoveError::CurrentTrack);
+        }
+        self.items.remove(item_index);
+        // Rebuild the play order without the removed item, remembering
+        // where it sat so the cursor can be corrected.
+        let mut removed_at = None;
+        let mut order = Vec::with_capacity(self.play_order.len().saturating_sub(1));
+        for (slot, &index) in self.play_order.iter().enumerate() {
+            if index == item_index {
+                removed_at = Some(slot);
+                continue;
+            }
+            order.push(if index > item_index { index - 1 } else { index });
+        }
+        self.play_order = order;
+        if let (Some(removed_slot), Some(position)) = (removed_at, self.position) {
+            if removed_slot < position {
+                self.position = Some(position - 1);
+            }
+        }
+        Ok(())
     }
 
     /// Jumps to an arbitrary index into `items`.
@@ -374,5 +440,123 @@ mod tests {
         distinct.dedup();
         assert_eq!(distinct.len(), 5);
         assert!(played.contains(&"n0".to_string()) && played.contains(&"n1".to_string()));
+    }
+
+    #[test]
+    fn insert_next_plays_immediately_after_the_current_track() {
+        let mut q = Queue::new(ids(3), Some(0)); // playing t0, next would be t1
+        q.insert_next("x".into());
+        assert_eq!(q.len(), 4);
+        assert_eq!(q.current(), Some("t0".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("x".into()));
+        // The original order continues behind the insertion.
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("t1".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("t2".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Stopped);
+    }
+
+    #[test]
+    fn insert_next_under_shuffle_is_really_next() {
+        let mut q = Queue::new(ids(5), Some(2));
+        q.set_shuffle(true, 42);
+        q.insert_next("x".into());
+        // Whatever the shuffled sequence is, the very next advance must
+        // land on the inserted track, then continue the shuffled tail.
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("x".into()));
+        let rest = q.advance(false);
+        assert_ne!(rest, AdvanceOutcome::Playing("x".into()));
+        // In the visible order the track sits right after its anchor (t2).
+        assert_eq!(q.items().iter().position(|i| i == "x"), Some(3));
+    }
+
+    #[test]
+    fn insert_next_into_an_idle_queue_becomes_the_current_track() {
+        let mut q = Queue::new(vec![], None);
+        q.insert_next("only".into());
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.current(), Some("only".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Stopped);
+    }
+
+    #[test]
+    fn insert_next_from_the_last_position_appends_the_tail() {
+        let mut q = Queue::new(ids(2), Some(1)); // on the last track
+        q.insert_next("x".into());
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("x".into()));
+        assert_eq!(q.advance(false), AdvanceOutcome::Stopped);
+    }
+
+    #[test]
+    fn remove_item_drops_the_track_and_keeps_the_rest_in_order() {
+        let mut q = Queue::new(ids(4), Some(0));
+        q.advance(false); // now on t1
+        q.remove_item(2).unwrap(); // remove t2 (ahead of the cursor)
+        assert_eq!(q.items(), &["t0".to_string(), "t1".to_string(), "t3".to_string()]);
+        // t2 is gone from the sequence, everything else still reachable.
+        let mut seen = vec![q.current().unwrap()];
+        while let AdvanceOutcome::Playing(id) = q.advance(false) {
+            seen.push(id);
+        }
+        assert_eq!(seen, vec!["t1".to_string(), "t3".to_string()]);
+    }
+
+    #[test]
+    fn remove_item_behind_the_cursor_fixes_the_position() {
+        let mut q = Queue::new(ids(3), Some(0));
+        q.advance(false); // on t1; t0 was played and sits behind
+        assert_eq!(q.current(), Some("t1".into()));
+        q.remove_item(0).unwrap();
+        // t1 keeps playing; with the played t0 gone it is now the first
+        // track in the sequence, so prev clamps onto it.
+        assert_eq!(q.current(), Some("t1".into()));
+        assert_eq!(q.previous(), Some("t1".into()));
+        // And "next" still walks the remaining tail.
+        assert_eq!(q.advance(false), AdvanceOutcome::Playing("t2".into()));
+    }
+
+    #[test]
+    fn remove_item_under_shuffle_keeps_every_remaining_track_reachable() {
+        let mut q = Queue::new(ids(4), Some(1));
+        q.set_shuffle(true, 7);
+        // Remove whichever item is *not* current but is next in sequence.
+        let current = q.current().unwrap();
+        let next = match q.advance(false) {
+            AdvanceOutcome::Playing(id) => id,
+            AdvanceOutcome::Stopped => panic!("four-track queue cannot end here"),
+        };
+        q.previous(); // step back onto `current`
+        assert_eq!(q.current(), Some(current));
+        let remove_index = ["t0", "t1", "t2", "t3"]
+            .iter()
+            .position(|candidate| *candidate == next)
+            .unwrap();
+        q.remove_item(remove_index).unwrap();
+        // The removed track must never come back; the rest must all play.
+        let mut played = vec![q.current().unwrap()];
+        while let AdvanceOutcome::Playing(id) = q.advance(false) {
+            assert_ne!(id, next, "removed track must not replay");
+            played.push(id);
+        }
+        let mut distinct = played.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 3, "every remaining track plays once");
+    }
+
+    #[test]
+    fn remove_item_rejects_out_of_range_and_the_current_track() {
+        let mut q = Queue::new(ids(3), Some(1));
+        assert_eq!(q.remove_item(3), Err(RemoveError::OutOfRange));
+        assert_eq!(q.current_item_index(), Some(1));
+        assert_eq!(q.remove_item(1), Err(RemoveError::CurrentTrack));
+        // Refusals mutate nothing.
+        assert_eq!(q.len(), 3);
+        assert_eq!(q.current(), Some("t1".into()));
+    }
+
+    #[test]
+    fn remove_item_on_an_idle_queue_is_out_of_range() {
+        let mut q = Queue::new(vec![], None);
+        assert_eq!(q.remove_item(0), Err(RemoveError::OutOfRange));
     }
 }

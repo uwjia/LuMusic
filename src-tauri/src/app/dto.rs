@@ -37,6 +37,16 @@ pub struct PlayerStateDto {
     pub queue_source_id: Option<String>,
 }
 
+/// Queue snapshot for the play-queue panel (`player_queue_get` command).
+/// `position` is an index into `tracks` (items whose track left the
+/// library are skipped), so the panel can highlight the playing row.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDto {
+    pub tracks: Vec<Track>,
+    pub position: Option<usize>,
+}
+
 /// Throttled progress tick (event `player://progress`).
 ///
 /// `track_id` identifies the track the numbers belong to: a tick serialized

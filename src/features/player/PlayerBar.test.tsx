@@ -8,6 +8,7 @@ import { useLyricsStore } from '@/stores/lyricsStore';
 import { DEFAULT_EQ, useEqualizerStore } from '@/stores/equalizerStore';
 import { SILENT_FRAME, useSpectrumStore } from '@/stores/spectrumStore';
 import { useArtEffectStore } from '@/stores/artEffectStore';
+import { useQueueStore } from '@/stores/queueStore';
 import { PlayerBar } from '@/features/player/PlayerBar';
 
 vi.mock('@/api', () => ({
@@ -22,6 +23,11 @@ vi.mock('@/api', () => ({
     playerSeek: vi.fn(),
     playerSetVolume: vi.fn(),
     playerSetMode: vi.fn(),
+    playerQueue: vi.fn(),
+    playerQueueInsertNext: vi.fn(),
+    playerQueueAppend: vi.fn(),
+    playerQueueRemove: vi.fn(),
+    playerQueueJump: vi.fn(),
     settingsGet: vi.fn(),
     settingsSet: vi.fn(),
     onSpectrum: vi.fn(() => () => {}),
@@ -63,6 +69,8 @@ beforeEach(() => {
   useEqualizerStore.setState({ open: false, eq: DEFAULT_EQ, loaded: false, error: null });
   useSpectrumStore.setState({ open: false, frame: [...SILENT_FRAME] });
   useArtEffectStore.setState({ open: false, effect: 'off' });
+  useQueueStore.setState({ open: false, queue: null, error: null });
+  vi.mocked(api.playerQueue).mockResolvedValue({ tracks: [], position: null });
   vi.mocked(api.settingsGet).mockResolvedValue({
     volume: 0.5,
     lastFolder: null,
@@ -174,6 +182,7 @@ describe('PlayerBar', () => {
 
     const dock = screen.getByTestId('eq-toggle').closest('.bar-tools')!;
     expect([...dock.children].map((c) => c.getAttribute('data-testid'))).toEqual([
+      'queue-toggle',
       'eq-toggle',
       'spectrum-toggle',
       'fx-toggle',
@@ -338,6 +347,35 @@ describe('PlayerBar', () => {
     fireEvent.click(screen.getByTestId('fx-toggle'));
     expect(useArtEffectStore.getState().open).toBe(false);
     expect(screen.queryByTestId('fx-panel')).not.toBeInTheDocument();
+  });
+
+  it('queue toggle opens the panel and joins the popover exclusivity', async () => {
+    vi.mocked(api.playerQueue).mockResolvedValue({
+      tracks: [track],
+      position: 0,
+    });
+    usePlayerStore.setState({ state: state() });
+    render(<PlayerBar />);
+    const queueBtn = screen.getByTestId('queue-toggle');
+    expect(queueBtn).toHaveAttribute('aria-label', 'Show play queue');
+    expect(queueBtn.querySelector('svg')).toBeInTheDocument();
+
+    fireEvent.click(queueBtn);
+    expect(await screen.findByTestId('queue-panel')).toBeInTheDocument();
+    expect(queueBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(api.playerQueue).toHaveBeenCalledTimes(1);
+
+    // Opening the EQ takes over the popover slot.
+    fireEvent.click(screen.getByTestId('eq-toggle'));
+    expect(screen.queryByTestId('queue-panel')).not.toBeInTheDocument();
+    expect(useQueueStore.getState().open).toBe(false);
+
+    // And back: the queue reopens, then toggles off again.
+    fireEvent.click(screen.getByTestId('queue-toggle'));
+    expect(await screen.findByTestId('queue-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('queue-toggle'));
+    expect(useQueueStore.getState().open).toBe(false);
+    expect(screen.queryByTestId('queue-panel')).not.toBeInTheDocument();
   });
 
   it('seek slider commits the dragged position', async () => {

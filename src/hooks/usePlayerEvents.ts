@@ -6,11 +6,19 @@ import { api } from '@/api';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
+import { useQueueStore } from '@/stores/queueStore';
 
 export function usePlayerEvents(): void {
   useEffect(() => {
     const unsubs = [
-      api.onPlayerState((state) => usePlayerStore.getState().applyState(state)),
+      api.onPlayerState((state) => {
+        usePlayerStore.getState().applyState(state);
+        // State events fire on every queue transition (load, next, prev,
+        // auto-advance, the queue edit commands); the queue list rides
+        // along so the panel never shows a stale list. Transitions only —
+        // the 4 Hz progress ticks take the other subscription.
+        void useQueueStore.getState().refresh();
+      }),
       api.onProgress((p) => {
         const store = usePlayerStore.getState();
         if (!store.state) return;
