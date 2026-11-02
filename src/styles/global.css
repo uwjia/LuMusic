@@ -1378,6 +1378,15 @@ button {
   max-height: 320px;
   overflow-y: auto;
   border-top: 1px solid var(--bg-3);
+  /* No visible scrollbar: the popover is compact and transient, and a
+     scrollbar gutter would fight the rounded frame. Scrolling itself
+     still works (wheel / drag / keyboard) — same approach as the lyrics
+     page. */
+  scrollbar-width: none; /* Firefox / future spec */
+}
+
+.queue-list::-webkit-scrollbar {
+  display: none; /* WebView2 (Chromium) */
 }
 
 .queue-row {
@@ -1437,9 +1446,12 @@ button {
 }
 
 /* Remove ✕ mirrors the track table's row action: hidden until hover,
-   disabled on the protected playing row. */
+   disabled on the protected playing row. The left margin keeps the ✕
+   clear of the right-aligned duration digits (6px read as attached to
+   the number, 14px as its own control). */
 .queue-remove {
   flex: 0 0 auto;
+  margin-left: 14px;
   margin-right: 6px;
   visibility: hidden;
   color: var(--fg-1);
