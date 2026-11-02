@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { api } from '@/api';
 import { useI18n } from '@/i18n';
+import { THEME_STORAGE_KEY } from '@/lib/theme';
 import { useLibraryStore } from '@/stores/libraryStore';
+import { useThemeStore } from '@/stores/themeStore';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 
 vi.mock('@/api', () => ({
@@ -82,6 +84,33 @@ describe('SettingsPage language switcher', () => {
     expect(screen.getByRole('heading', { name: 'Language' })).toBeInTheDocument();
     expect(screen.getByTestId('scan-button')).toHaveTextContent('Scan folder');
     expect(localStorage.getItem('lumusic.language')).toBe('en');
+  });
+});
+
+describe('SettingsPage theme section', () => {
+  // The store is a module singleton; jsdom's matchMedia reports "light",
+  // so `system` resolves to light unless a test picks a mode explicitly.
+  beforeEach(() => {
+    localStorage.removeItem(THEME_STORAGE_KEY);
+  });
+
+  it('shows the three modes with the active one marked', () => {
+    useThemeStore.setState({ preference: 'light' });
+    render(<SettingsPage />);
+    expect(screen.getByTestId('theme-system')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('theme-light')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('theme-dark')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('switching mode persists the choice and re-themes the document', () => {
+    useThemeStore.setState({ preference: 'system' });
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('theme-dark'));
+
+    expect(useThemeStore.getState().preference).toBe('dark');
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 });
 

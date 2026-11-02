@@ -106,6 +106,7 @@ domain/  纯逻辑：Track、LibraryIndex、Queue（随机/循环规则）、Pla
 ### 样式（CSS）
 
 - 样式集中在 `src/styles/global.css`，颜色/圆角一律用 `:root` 设计令牌（`--bg-*`/`--fg-*`/`--accent*`），禁止硬编码色值。
+- **主题（深/浅色）**：深色是 `:root` 默认调色板；浅色经 `<html data-theme="light">` 只覆盖 `--bg-*`/`--fg-*`/`--overlay` 与 `color-scheme`。偏好为纯前端 localStorage（`lumusic.theme`，`system|light|dark`；**未存储默认 `dark`，不看系统偏好**；仅显式选 `system` 才跟随系统并即时切换——持久化模式镜像语言 store，但**不做**语言式的首启系统检测；不进后端设置）。`--accent*`/`--danger` 不随主题变化（压 accent 的白字、频谱渐变均依赖）。
 - **原生 `<select>` 必须自绘箭头**：`appearance: none` + 内联 SVG 背景（参照 `.eq-select`）。WebView2 的原生下拉箭头不受 `padding-right` 影响、会紧贴右边缘；同时补 `:focus-visible` 边框高亮，与输入框一致。
 
 ### Non-goals（当前不做）

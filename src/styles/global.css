@@ -1,4 +1,4 @@
-/* Global reset + design tokens (dark theme). */
+/* Global reset + design tokens (dark theme is the default palette). */
 :root {
   --bg-0: #0f1117;
   --bg-1: #171a23;
@@ -13,6 +13,22 @@
   --overlay: rgba(15, 17, 23, 0.55);
   --radius: 8px;
   color-scheme: dark;
+}
+
+/* Light theme: the theme store publishes the resolved palette on
+   <html data-theme>. Only neutrals and the overlay scrim remap —
+   accents/danger stay theme-constant (white-on-accent text, the EQ and
+   the spectrum gradient all rely on them), so no component CSS changes. */
+:root[data-theme='light'] {
+  --bg-0: #f5f6fa;
+  --bg-1: #ffffff;
+  --bg-2: #eceef4;
+  --bg-3: #dcdfe9;
+  --fg-0: #1a1d27;
+  --fg-1: #4a5064;
+  --fg-2: #6b7385;
+  --overlay: rgba(245, 246, 250, 0.65);
+  color-scheme: light;
 }
 
 * {
@@ -847,8 +863,9 @@ button {
   font-size: 12px;
 }
 
-/* Segmented pill for the language switch */
-.language-switch {
+/* Segmented pill for the language / theme switches */
+.language-switch,
+.theme-switch {
   display: inline-flex;
   gap: 4px;
   align-self: flex-start;
@@ -857,21 +874,31 @@ button {
   background: var(--bg-2);
 }
 
-/* 中文与英文按钮宽度一致，切换时不跳动 */
+/* 按钮定宽：中英文标签宽度一致，切换时不跳动 */
 .language-switch .btn {
   min-width: 110px;
+}
+
+.theme-switch .btn {
+  min-width: 96px;
+}
+
+.language-switch .btn,
+.theme-switch .btn {
   border: none;
   border-radius: 999px;
   background: transparent;
   color: var(--fg-1);
 }
 
-.language-switch .btn:hover {
+.language-switch .btn:hover,
+.theme-switch .btn:hover {
   background: var(--bg-3);
   color: var(--fg-0);
 }
 
-.language-switch .btn-primary {
+.language-switch .btn-primary,
+.theme-switch .btn-primary {
   background: var(--accent);
   color: #fff;
 }

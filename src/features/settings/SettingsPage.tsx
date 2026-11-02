@@ -7,13 +7,23 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { api } from '@/api';
 import { Button } from '@/components/ui/Button';
 import { LOCALES, LOCALE_NAMES, useTranslation, type MessageKey } from '@/i18n';
+import { THEME_PREFERENCES, type ThemePreference } from '@/lib/theme';
 import { useLibraryStore } from '@/stores/libraryStore';
+import { useThemeStore } from '@/stores/themeStore';
 import {
+  ContrastIcon,
   InfoIcon,
   LanguagesIcon,
   MonitorIcon,
   MusicIcon,
 } from '@/features/settings/SettingsIcons';
+
+/** Catalogue key per theme mode (drives both the pill buttons and a11y). */
+const THEME_LABEL_KEY: Record<ThemePreference, MessageKey> = {
+  system: 'settings.themeSystem',
+  light: 'settings.themeLight',
+  dark: 'settings.themeDark',
+};
 
 export function SettingsPage() {
   const lastScan = useLibraryStore((s) => s.lastScan);
@@ -21,6 +31,8 @@ export function SettingsPage() {
   const error = useLibraryStore((s) => s.error);
   const scan = useLibraryStore((s) => s.scan);
   const { locale, setLocale, t } = useTranslation();
+  const themePreference = useThemeStore((s) => s.preference);
+  const setThemePreference = useThemeStore((s) => s.setPreference);
 
   const [folder, setFolder] = useState<string>('');
   const [appName, setAppName] = useState<string>('');
@@ -177,6 +189,31 @@ export function SettingsPage() {
                 data-testid={`locale-${l}`}
               >
                 {LOCALE_NAMES[l]}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-card">
+          <div className="settings-card-head">
+            <span className="settings-icon">
+              <ContrastIcon />
+            </span>
+            <div>
+              <h3>{t('settings.theme')}</h3>
+              <p className="muted">{t('settings.themeHint')}</p>
+            </div>
+          </div>
+          <div className="theme-switch" role="group" aria-label={t('settings.theme')}>
+            {THEME_PREFERENCES.map((mode) => (
+              <Button
+                key={mode}
+                variant={mode === themePreference ? 'primary' : 'ghost'}
+                aria-pressed={mode === themePreference}
+                onClick={() => setThemePreference(mode)}
+                data-testid={`theme-${mode}`}
+              >
+                {t(THEME_LABEL_KEY[mode])}
               </Button>
             ))}
           </div>
