@@ -2,12 +2,15 @@
 // Playlist-level actions (rename / duplicate / delete) live in the sidebar's
 // right-click menu, so the header only identifies the playlist.
 
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useTranslation } from '@/i18n';
 import { displayPlaylistName } from '@/lib/playlistDisplay';
 import { TrackTable } from '@/features/library/TrackTable';
 import { usePlayerStore } from '@/stores/playerStore';
 import { usePlaylistStore } from '@/stores/playlistStore';
+import type { Track } from '@/types/track';
 
 export function PlaylistPage({ playlistId }: { playlistId: string }) {
   const playlists = usePlaylistStore((s) => s.playlists);
@@ -16,6 +19,9 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   const error = usePlaylistStore((s) => s.error);
   const { removeTrack } = usePlaylistStore.getState();
   const { t } = useTranslation();
+  // Track awaiting removal confirmation: the ✕ sits right in the row, so
+  // one stray click must not drop the track — the button only stages it.
+  const [confirmingTrack, setConfirmingTrack] = useState<Track | null>(null);
 
   const playlist = playlists.find((p) => p.id === playlistId);
   if (!playlist) {
@@ -62,12 +68,27 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           <Button
             className="row-btn"
             aria-label={t('playlist.removeTrack', { title: track.title })}
-            onClick={() => void removeTrack(track.id)}
+            onClick={() => setConfirmingTrack(track)}
           >
             ✕
           </Button>
         )}
       />
+
+      {confirmingTrack ? (
+        <ConfirmDialog
+          title={t('playlist.removeConfirmTitle')}
+          message={t('playlist.removeConfirmMessage', { title: confirmingTrack.title })}
+          confirmLabel={t('playlist.removeConfirm')}
+          cancelLabel={t('common.cancel')}
+          onConfirm={() => {
+            const target = confirmingTrack;
+            setConfirmingTrack(null);
+            void removeTrack(target.id);
+          }}
+          onCancel={() => setConfirmingTrack(null)}
+        />
+      ) : null}
     </section>
   );
 }

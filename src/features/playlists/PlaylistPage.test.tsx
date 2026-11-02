@@ -125,4 +125,28 @@ describe('PlaylistPage', () => {
     );
     expect(usePlayerStore.getState().state?.queueSourceId).toBe('p1');
   });
+
+  it('removes a track only after the confirmation is accepted', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    vi.mocked(api.playlistRemoveTrack).mockResolvedValue(undefined);
+    vi.mocked(api.playlistGetTracks).mockResolvedValue([tracks[1]]);
+    render(<PlaylistPage playlistId="p1" />);
+    // The ✕ only stages the removal — nothing reaches the backend yet.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a from playlist' }));
+    expect(api.playlistRemoveTrack).not.toHaveBeenCalled();
+    expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'));
+    await vi.waitFor(() =>
+      expect(api.playlistRemoveTrack).toHaveBeenCalledWith('p1', 'a'),
+    );
+  });
+
+  it('keeps the track when the removal confirmation is cancelled', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    render(<PlaylistPage playlistId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove b from playlist' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
+    expect(api.playlistRemoveTrack).not.toHaveBeenCalled();
+  });
 });

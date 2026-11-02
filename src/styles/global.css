@@ -486,6 +486,10 @@ button {
 }
 
 .row-action {
+  /* Push to the cell's right edge: the duration keeps the left side, so
+     the ✕ can never sit flush against the time digits (the 6px gap
+     alone made it look — and misclick — like part of the number). */
+  margin-left: auto;
   visibility: hidden;
 }
 

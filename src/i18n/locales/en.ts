@@ -139,6 +139,10 @@ export const en = {
   'playlist.empty': 'This playlist is empty',
   'playlist.emptyHint': 'Add tracks from the library using the ＋ button on each row.',
   'playlist.removeTrack': 'Remove {title} from playlist',
+  'playlist.removeConfirmTitle': 'Remove track?',
+  'playlist.removeConfirmMessage':
+  'Remove "{title}" from this playlist? The track stays in your library.',
+  'playlist.removeConfirm': 'Remove',
   'playlist.copyName': '{name} (copy)',
   'playlist.copyNameN': '{name} (copy) {n}',
   'playlist.deleteConfirmTitle': 'Delete playlist?',

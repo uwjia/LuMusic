@@ -28,9 +28,16 @@ describe('ConfirmDialog', () => {
     expect(screen.getByTestId('confirm-dialog')).toHaveTextContent('Delete "Focus"?');
   });
 
-  it('focuses Cancel first so a stray Enter cannot confirm', () => {
+  it('focuses Confirm so Enter immediately confirms', () => {
     renderDialog();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(screen.getByTestId('confirm-dialog-confirm')).toHaveFocus();
+  });
+
+  it('Enter confirms and never falls through to cancel', () => {
+    const { onConfirm, onCancel } = renderDialog();
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it('confirming calls only onConfirm', () => {

@@ -1,8 +1,10 @@
 // Modal confirmation for destructive actions (e.g. deleting a playlist).
 //
-// The safe choice wins by default: focus starts on Cancel, and Escape or
-// an overlay press also cancel. Dependency-free like ContextMenu — a fixed
-// overlay with z-index is enough, no portal needed.
+// The dialog only opens after a deliberate staging click, so Enter is the
+// "go ahead" default (like window.confirm): focus starts on Confirm and a
+// document-wide Enter confirms. Escape or an overlay press still cancels.
+// Dependency-free like ContextMenu — a fixed overlay with z-index is
+// enough, no portal needed.
 
 import { useEffect, useRef } from 'react';
 
@@ -23,18 +25,23 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    // Keyboard users land on the safe action first; a stray Enter cannot
-    // confirm the deletion.
-    cancelRef.current?.focus();
+    confirmRef.current?.focus();
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Escape') {
+        onCancel();
+      } else if (e.key === 'Enter') {
+        // preventDefault also suppresses the native activation of a
+        // focused button (e.g. Cancel), so Enter can only ever confirm.
+        e.preventDefault();
+        onConfirm();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
+  }, [onConfirm, onCancel]);
 
   return (
     <div
@@ -53,10 +60,11 @@ export function ConfirmDialog({
         <div className="dialog-title">{title}</div>
         <p className="dialog-message">{message}</p>
         <div className="dialog-actions">
-          <button ref={cancelRef} type="button" className="btn" onClick={onCancel}>
+          <button type="button" className="btn" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button
+            ref={confirmRef}
             type="button"
             className="btn btn-danger-solid"
             data-testid="confirm-dialog-confirm"
