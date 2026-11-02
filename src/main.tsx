@@ -2,7 +2,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from '@/App';
+import { disableDefaultContextMenu } from '@/lib/disableDefaultContextMenu';
 import '@/styles/global.css';
+
+// Runs before any render: the WebView's stock right-click menu must never
+// appear, custom menus (playlist rows) opt in via their own handlers.
+disableDefaultContextMenu();
 
 const container = document.getElementById('root');
 if (!container) {
