@@ -83,12 +83,11 @@ export function TrackTable({
               type="button"
               role="columnheader"
               disabled={!sortable}
-              className={`track-header-cell ${col.className} ${active ? 'is-active' : ''}`}
+              className={`track-header-cell ${col.className}`}
               aria-sort={active ? (descending ? 'descending' : 'ascending') : 'none'}
               onClick={() => sortable && onSort(col.key as SortField)}
             >
               {t(col.labelKey)}
-              {active ? (descending ? ' ↓' : ' ↑') : ''}
             </button>
           );
         })}

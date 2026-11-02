@@ -298,10 +298,27 @@ button {
   padding: 4px 6px;
 }
 
+/* Same recipe as .search-input/.folder-input (token border + accent
+   focus), but recessed with --bg-0 like the settings card's fields —
+   the sidebar surface itself is --bg-1, so a --bg-1 field would read
+   as a flat hole. font: inherit keeps the name at row size: the native
+   input default (~13.3px) visibly shrinks the text mid-edit. */
 .playlist-create input,
 .playlist-rename input {
   flex: 1;
   min-width: 0;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-3);
+  border-radius: var(--radius);
+  background: var(--bg-0);
+  color: var(--fg-0);
+}
+
+.playlist-create input:focus-visible,
+.playlist-rename input:focus-visible {
+  border-color: var(--accent);
+  outline: none;
 }
 
 .sidebar-error {
@@ -438,10 +455,6 @@ button {
 
 .track-header-cell:disabled {
   cursor: default;
-}
-
-.track-header-cell.is-active {
-  color: var(--accent-2);
 }
 
 .track-body {

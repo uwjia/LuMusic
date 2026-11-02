@@ -220,6 +220,30 @@ describe('Sidebar', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('already exists'),
     );
   });
+
+  it('dismisses the create editor on an outside press without creating', () => {
+    render(<Sidebar view={{ kind: 'library' }} onNavigate={onNavigate} />);
+    fireEvent.click(screen.getByTestId('new-playlist'));
+    const input = screen.getByLabelText('New playlist name');
+    fireEvent.change(input, { target: { value: 'Road Trip' } });
+    fireEvent.pointerDown(document.body);
+    // The typed draft is discarded, not committed.
+    expect(api.playlistCreate).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('New playlist name')).not.toBeInTheDocument();
+  });
+
+  it('Escape closes the create editor and clears the abandoned draft', () => {
+    render(<Sidebar view={{ kind: 'library' }} onNavigate={onNavigate} />);
+    fireEvent.click(screen.getByTestId('new-playlist'));
+    const input = screen.getByLabelText('New playlist name');
+    fireEvent.change(input, { target: { value: 'Draft' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(api.playlistCreate).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('New playlist name')).not.toBeInTheDocument();
+    // Reopening starts from a clean draft, not the abandoned one.
+    fireEvent.click(screen.getByTestId('new-playlist'));
+    expect((screen.getByLabelText('New playlist name') as HTMLInputElement).value).toBe('');
+  });
 });
 
 describe('Sidebar playlist context menu', () => {
@@ -382,6 +406,39 @@ describe('Sidebar playlist context menu', () => {
     fireEvent.keyDown(screen.getByLabelText('Playlist name'), { key: 'Escape' });
     expect(api.playlistRename).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Playlist name')).not.toBeInTheDocument();
+  });
+
+  it('cancels the rename on an outside press; the press still acts where it landed', () => {
+    const navigate = vi.fn();
+    render(<Sidebar view={{ kind: 'library' }} onNavigate={navigate} />);
+    openMenu('Chill');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = screen.getByLabelText('Playlist name');
+    fireEvent.change(input, { target: { value: 'Road Trip' } });
+    // Pressing another row must both dismiss the editor and navigate —
+    // the dismissal must not swallow the press.
+    const focusRow = screen.getByText('Focus');
+    fireEvent.pointerDown(focusRow);
+    fireEvent.click(focusRow);
+    // The half-edited draft is discarded, not committed.
+    expect(api.playlistRename).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Playlist name')).not.toBeInTheDocument();
+    expect(navigate).toHaveBeenCalledWith({ kind: 'playlist', id: 'p2' });
+  });
+
+  it('a press on the editor itself does not cancel before the save lands', async () => {
+    vi.mocked(api.playlistRename).mockResolvedValue(undefined);
+    render(<Sidebar view={{ kind: 'library' }} onNavigate={vi.fn()} />);
+    openMenu('Chill');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = screen.getByLabelText('Playlist name');
+    fireEvent.change(input, { target: { value: 'Road Trip' } });
+    // Real clicks press before they click: a press on Save must not
+    // tear the editor down out from under its own submit.
+    const save = screen.getByRole('button', { name: 'Save' });
+    fireEvent.pointerDown(save);
+    fireEvent.click(save);
+    await vi.waitFor(() => expect(api.playlistRename).toHaveBeenCalledWith('p1', 'Road Trip'));
   });
 
   it('seeds the inline editor with the canonical name of auto playlists', () => {

@@ -76,6 +76,19 @@ describe('TrackTable', () => {
     );
   });
 
+  it('styles every header cell alike - no arrow on the sorted column', () => {
+    // The sorted column must not carry its own style hook (it used to go
+    // purple via is-active) nor an arrow suffix: sorting stays observable
+    // through aria-sort and the list order itself.
+    renderTable({ sort: 'title', descending: false });
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(header.className).toMatch(
+        /^track-header-cell col-(index|title|artist|album|duration)$/,
+      );
+    }
+    expect(screen.getByRole('columnheader', { name: 'Title' }).textContent).toBe('Title');
+  });
+
   it('shows the empty state instead of a table when there are no tracks', () => {
     renderTable({ tracks: [], emptyTitle: 'Nothing here', emptyHint: 'Scan something' });
     expect(screen.getByText('Nothing here')).toBeInTheDocument();

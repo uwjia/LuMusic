@@ -3,7 +3,7 @@
 // Playlist row actions (rename / duplicate / delete) live in a custom
 // right-click menu on the row; renaming swaps the row for an inline editor.
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ContextMenu, type ContextMenuEntry } from '@/components/ui/ContextMenu';
 import { MusicIcon, SettingsIcon } from '@/features/settings/SettingsIcons';
@@ -17,6 +17,24 @@ import type { Playlist } from '@/types/track';
 interface SidebarProps {
   view: { kind: 'library' } | { kind: 'settings' } | { kind: 'playlist'; id: string };
   onNavigate: (view: SidebarProps['view']) => void;
+}
+
+/** Dismiss an inline editor on a pointer press outside its form — the
+ *  same no-side-effect dismissal every popover uses (see ContextMenu).
+ *  Presses inside the editor (input, Save) are ignored so the submit
+ *  click still lands; an outside press itself is not swallowed, so
+ *  whatever it hit (navigation, another menu) still acts. */
+function useOutsidePressDismiss<T extends HTMLElement>(active: boolean, dismiss: () => void) {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    if (!active) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) dismiss();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [active, dismiss]);
+  return ref;
 }
 
 export function Sidebar({ view, onNavigate }: SidebarProps) {
@@ -41,6 +59,15 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
   // Playlist awaiting delete confirmation; deletion is destructive and
   // unrecoverable, so the context menu only stages it here.
   const [confirmingDelete, setConfirmingDelete] = useState<Playlist | null>(null);
+  // Outside press discards the draft and closes the editor — the model
+  // stays "Save/Enter commits, Escape/outside press cancels".
+  const cancelRename = useCallback(() => setRenamingId(null), []);
+  const cancelCreate = useCallback(() => {
+    setNewName('');
+    setCreating(false);
+  }, []);
+  const renameFormRef = useOutsidePressDismiss<HTMLFormElement>(renamingId != null, cancelRename);
+  const createFormRef = useOutsidePressDismiss<HTMLFormElement>(creating, cancelCreate);
 
   const submit = async () => {
     // Trim here so the API contract stays "display-ready name".
@@ -145,6 +172,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
               <li key={playlist.id}>
                 {renamingId === playlist.id ? (
                   <form
+                    ref={renameFormRef}
                     className="playlist-rename"
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -156,7 +184,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
                       aria-label={t('playlist.nameLabel')}
                       value={draftName}
                       onChange={(e) => setDraftName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Escape' && setRenamingId(null)}
+                      onKeyDown={(e) => e.key === 'Escape' && cancelRename()}
                     />
                     <button type="submit" className="btn btn-primary">
                       {t('playlist.save')}
@@ -192,6 +220,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
 
         {creating ? (
           <form
+            ref={createFormRef}
             className="playlist-create"
             onSubmit={(e) => {
               e.preventDefault();
@@ -203,7 +232,7 @@ export function Sidebar({ view, onNavigate }: SidebarProps) {
               aria-label={t('nav.newPlaylistName')}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onBlur={() => newName.trim() === '' && setCreating(false)}
+              onKeyDown={(e) => e.key === 'Escape' && cancelCreate()}
             />
             <button type="submit" className="btn btn-primary">
               {t('nav.add')}
