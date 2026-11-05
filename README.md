@@ -131,3 +131,12 @@ scripts/gen-icons.mjs deterministic app icon generation (no binary assets)
 ## Non-goals (for now)
 
 Lyrics, equalizer, gapless playback, tag editing, album-art extraction.
+
+## License
+
+Copyright (C) 2026 LuMusic Contributors.
+
+LuMusic is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. See [LICENSE](LICENSE).

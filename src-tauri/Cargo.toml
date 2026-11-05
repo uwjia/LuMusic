@@ -2,6 +2,7 @@
 name = "lumusic"
 version = "0.1.5"
 description = "LuMusic - a local music player built with Tauri + React"
+license = "GPL-3.0-or-later"
 edition = "2021"
 
 [lib]

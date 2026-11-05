@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-本地音乐播放器：**Rust (Tauri 2) + React 19 + Vite + zustand**，严格分层、零冗余依赖、行为必有测试。界面支持 简体中文 / English。
+本地音乐播放器：**Rust (Tauri 2) + React 19 + Vite + zustand**，严格分层、零冗余依赖、行为必有测试。界面支持 简体中文 / English。开源协议：**GPL-3.0-or-later**（根目录 `LICENSE`，元数据字段用 SPDX 标识符，署名 LuMusic Contributors）。
 
 ## 常用命令
 
